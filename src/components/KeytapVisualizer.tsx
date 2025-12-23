@@ -5,13 +5,14 @@ import { StatusMessage } from './StatusMessage'
 import { RecordButton } from './RecordButton'
 import styles from './KeytapVisualizer.module.css'
 
-const RECORDING_DURATION = 1000 // 1秒
+const RECORDING_DURATION = 4000 // 4秒
 
 export function KeytapVisualizer() {
   const {
     status,
     statusMessage,
     recordingData,
+    recordingProgress,
     isRecording,
     canRecord,
     startRecording,
@@ -46,7 +47,11 @@ export function KeytapVisualizer() {
 
       <StatusMessage status={status} message={statusMessage} />
 
-      <WaveformCanvas recordingData={recordingData} />
+      <WaveformCanvas 
+        recordingData={recordingData}
+        isRecording={isRecording}
+        progress={recordingProgress}
+      />
     </div>
   )
 }

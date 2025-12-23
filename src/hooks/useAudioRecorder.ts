@@ -6,6 +6,7 @@ export interface UseAudioRecorderReturn {
   status: RecordingStatus
   statusMessage: string
   recordingData: Float32Array | null
+  recordingProgress: number // 0-1の録音進捗
   isRecording: boolean
   canRecord: boolean
   startRecording: () => Promise<void>
@@ -16,6 +17,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   const [status, setStatus] = useState<RecordingStatus>('idle')
   const [statusMessage, setStatusMessage] = useState('')
   const [recordingData, setRecordingData] = useState<Float32Array | null>(null)
+  const [recordingProgress, setRecordingProgress] = useState(0)
   const [isRecording, setIsRecording] = useState(false)
   const [canRecord, setCanRecord] = useState(false)
 
@@ -53,6 +55,15 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     setIsRecording(true)
     setStatus('recording')
     setStatusMessage(`録音中... (${recordingDuration / 1000}秒)`)
+    setRecordingProgress(0)
+
+    // 進捗更新用のタイマー
+    const startTime = Date.now()
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime
+      const progress = Math.min(elapsed / recordingDuration, 1)
+      setRecordingProgress(progress)
+    }, 50) // 50msごとに更新
 
     // AudioContextを初期化
     if (!audioContextRef.current) {
@@ -79,12 +90,27 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
 
     const recordingChunks: Float32Array[] = []
 
+    // チャンクを結合してFloat32Arrayを作成するヘルパー関数
+    const combineChunks = (chunks: Float32Array[]): Float32Array => {
+      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+      const combined = new Float32Array(totalLength)
+      let offset = 0
+      for (const chunk of chunks) {
+        combined.set(chunk, offset)
+        offset += chunk.length
+      }
+      return combined
+    }
+
     // 音声データを収集
     scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
       const inputBuffer = audioProcessingEvent.inputBuffer
       const inputData = inputBuffer.getChannelData(0)
       // データをコピー
       recordingChunks.push(new Float32Array(inputData))
+
+      // リアルタイムで波形を更新
+      setRecordingData(combineChunks(recordingChunks))
     }
 
     // オーディオグラフを接続
@@ -94,6 +120,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
 
     // 指定時間後に録音を停止
     setTimeout(() => {
+      clearInterval(progressInterval)
+      setRecordingProgress(1)
       stopRecording(scriptProcessor, recordingChunks)
     }, recordingDuration)
   }, [isRecording, recordingDuration])
@@ -122,6 +150,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return
     }
 
+    // 最終的なデータを設定（既にリアルタイムで更新されているが、念のため）
     const totalLength = recordingChunks.reduce(
       (sum, chunk) => sum + chunk.length,
       0
@@ -143,6 +172,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     status,
     statusMessage,
     recordingData,
+    recordingProgress,
     isRecording,
     canRecord,
     startRecording,
