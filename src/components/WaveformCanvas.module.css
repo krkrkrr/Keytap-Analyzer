@@ -8,6 +8,35 @@
   overflow: hidden;
 }
 
+.canvasHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.playButton {
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  background-color: #4CAF50;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.playButton:hover {
+  background-color: #45a049;
+}
+
+.playButton:active {
+  background-color: #3d8b40;
+}
+
 .waveformCanvas {
   display: block;
   width: 100%;

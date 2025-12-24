@@ -1,5 +1,7 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import styles from './WaveformCanvas.module.css'
+
+const SAMPLE_RATE = 44100
 
 interface AveragedWaveformProps {
   waveformData: Float32Array | null
@@ -10,6 +12,9 @@ interface AveragedWaveformProps {
 
 export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5, peakAlignEnabled = false }: AveragedWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
 
   const drawEmptyCanvas = useCallback((canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
     ctx.fillStyle = '#f0f8ff'
@@ -130,6 +135,75 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     ctx.fillText(`同期加算回数: ${keyTapCount}`, canvas.width - 10, 20)
   }, [keyTapCount])
 
+  // 波形を再生する関数
+  const playWaveform = useCallback(() => {
+    if (!waveformData || waveformData.length === 0) return
+
+    // 既に再生中なら停止
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.stop()
+      sourceNodeRef.current = null
+    }
+
+    // AudioContextを作成（または再利用）
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+    }
+
+    const audioContext = audioContextRef.current
+
+    // AudioContextがsuspendedなら再開
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
+    }
+
+    // AudioBufferを作成
+    const audioBuffer = audioContext.createBuffer(1, waveformData.length, SAMPLE_RATE)
+    const channelData = audioBuffer.getChannelData(0)
+    
+    // 波形データをコピー（音量を調整）
+    const maxAmplitude = Math.max(...Array.from(waveformData).map(Math.abs))
+    const gain = maxAmplitude > 0 ? 0.8 / maxAmplitude : 1
+    for (let i = 0; i < waveformData.length; i++) {
+      channelData[i] = waveformData[i] * gain
+    }
+
+    // AudioBufferSourceNodeを作成して再生
+    const sourceNode = audioContext.createBufferSource()
+    sourceNode.buffer = audioBuffer
+    sourceNode.connect(audioContext.destination)
+    
+    sourceNode.onended = () => {
+      setIsPlaying(false)
+      sourceNodeRef.current = null
+    }
+
+    sourceNodeRef.current = sourceNode
+    setIsPlaying(true)
+    sourceNode.start()
+  }, [waveformData])
+
+  // 再生停止
+  const stopWaveform = useCallback(() => {
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.stop()
+      sourceNodeRef.current = null
+      setIsPlaying(false)
+    }
+  }, [])
+
+  // コンポーネントのクリーンアップ
+  useEffect(() => {
+    return () => {
+      if (sourceNodeRef.current) {
+        sourceNodeRef.current.stop()
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+      }
+    }
+  }, [])
+
   const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -164,7 +238,18 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
 
   return (
     <div className={styles.canvasContainer}>
-      <h3 style={{ margin: '0 0 10px 0', color: '#4CAF50' }}>📊 同期加算平均波形</h3>
+      <div className={styles.canvasHeader}>
+        <h3 style={{ margin: 0, color: '#4CAF50' }}>📊 同期加算平均波形</h3>
+        {waveformData && waveformData.length > 0 && (
+          <button 
+            onClick={isPlaying ? stopWaveform : playWaveform}
+            className={styles.playButton}
+            title={isPlaying ? '停止' : '再生'}
+          >
+            {isPlaying ? '⏹️ 停止' : '▶️ 再生'}
+          </button>
+        )}
+      </div>
       <canvas ref={canvasRef} className={styles.waveformCanvas} />
     </div>
   )

@@ -7,7 +7,7 @@ const DEFAULT_WINDOW_OFFSET_MS = 5   // デフォルトのキータップ前オ�
 const SAMPLE_RATE = 44100    // サンプルレート (Hz)
 const PEAK_SEARCH_WINDOW_MS = 50  // ピーク検出用の検索範囲 (ms)
 const MEASUREMENT_AUDIO_PEAK_OFFSET_MS = 10 // ピーク同期時のピークオフセット (ms)
-const MEASUREMENT_AUDIO_PERIOD_MS = 200 // ピーク同期時の周期 (ms)
+const MEASUREMENT_AUDIO_PERIOD_MS = 100 // ピーク同期時の周期 (ms)
 
 export interface UseAudioRecorderReturn {
   status: RecordingStatus

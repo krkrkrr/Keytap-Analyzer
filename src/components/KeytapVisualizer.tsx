@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import { WaveformCanvas } from './WaveformCanvas'
 import { AveragedWaveform } from './AveragedWaveform'
+import { AudioFeaturesDisplay } from './AudioFeaturesDisplay'
 import { StatusMessage } from './StatusMessage'
 import { RecordButton } from './RecordButton'
 import styles from './KeytapVisualizer.module.css'
@@ -98,6 +99,11 @@ export function KeytapVisualizer() {
         windowOffsetMs={windowOffsetMs}
         peakAlignEnabled={peakAlignEnabled}
       />
+
+      {/* 音声特徴量の表示 */}
+      {status === 'completed' && averagedWaveform && (
+        <AudioFeaturesDisplay waveformData={averagedWaveform} />
+      )}
 
       {status === 'completed' && keyTapCount > 0 && (
         <div className={styles.offsetControl}>
