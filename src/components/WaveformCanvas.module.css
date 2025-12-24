@@ -3,6 +3,9 @@
   border: 1px solid #ddd;
   border-radius: 4px;
   background-color: #fafafa;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .waveformCanvas {
