@@ -65,9 +65,9 @@ export function KeytapVisualizer() {
 
   return (
     <div className={styles.container}>
-      <h1>🎹 Keytap Visualizer</h1>
+      <h1>Keytap Analyzer</h1>
       <p className={styles.description}>
-        キーボードのタイプ音を可視化するWebアプリケーション
+        キーボードのタイプ音を測定するツール
       </p>
 
       <div className={styles.controlGroup}>
