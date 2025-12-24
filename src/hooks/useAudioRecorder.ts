@@ -6,6 +6,8 @@ export type RecordingStatus = 'idle' | 'recording' | 'completed' | 'error'
 const DEFAULT_WINDOW_OFFSET_MS = 5   // デフォルトのキータップ前オフセット (ms)
 const SAMPLE_RATE = 44100    // サンプルレート (Hz)
 const PEAK_SEARCH_WINDOW_MS = 50  // ピーク検出用の検索範囲 (ms)
+const MEASUREMENT_AUDIO_PEAK_OFFSET_MS = 10 // ピーク同期時のピークオフセット (ms)
+const MEASUREMENT_AUDIO_PERIOD_MS = 200 // ピーク同期時の周期 (ms)
 
 export interface UseAudioRecorderReturn {
   status: RecordingStatus
@@ -302,7 +304,9 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
         summedWaveform[i] /= windows.length
       }
 
-      setAveragedWaveform(summedWaveform)
+      const slicedWaveform = sliceWaveform(summedWaveform, MEASUREMENT_AUDIO_PEAK_OFFSET_MS, MEASUREMENT_AUDIO_PERIOD_MS)
+
+      setAveragedWaveform(slicedWaveform)
       setWindowOffsetMs(offsetMs)
       setPeakAlignEnabled(true)
       setStatus('completed')
@@ -389,4 +393,27 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     initializeAudio,
     recalculateAveragedWaveform,
   }
+}
+
+function sliceWaveform(wave: Float32Array, peakOffsetMs: number, periodMs: number): Float32Array {
+  const sampleRate = SAMPLE_RATE
+  const peakOffsetSamples = Math.floor(peakOffsetMs * (sampleRate / 1000))
+  const periodSamples = Math.floor(periodMs * (sampleRate / 1000))
+  const getPeakIndex = (_wave: Float32Array) => {
+    let maxValue = 0
+    let peakIndex = 0
+    for (let i = 0; i < _wave.length; i++) {
+      const absValue = Math.abs(_wave[i])
+      if (absValue > maxValue) {
+        maxValue = absValue
+        peakIndex = i
+      }
+    }
+    return peakIndex
+  }
+  const currentPeakSamples = getPeakIndex(wave)
+  return wave.slice(
+    Math.max(0, currentPeakSamples - peakOffsetSamples),
+    Math.min(wave.length, currentPeakSamples - peakOffsetSamples + periodSamples)
+  )
 }
