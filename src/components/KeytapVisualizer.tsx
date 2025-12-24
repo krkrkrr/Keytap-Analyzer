@@ -3,13 +3,18 @@ import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import { WaveformCanvas } from './WaveformCanvas'
 import { AveragedWaveform } from './AveragedWaveform'
 import { AudioFeaturesDisplay } from './AudioFeaturesDisplay'
+import { SpectrumDisplay } from './SpectrumDisplay'
 import { StatusMessage } from './StatusMessage'
 import { RecordButton } from './RecordButton'
 import styles from './KeytapVisualizer.module.css'
 
-const RECORDING_DURATION = 4000 // 4秒
+const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
+const MIN_RECORDING_DURATION = 1000 // 最小1秒
+const MAX_RECORDING_DURATION = 30000 // 最大30秒
 
 export function KeytapVisualizer() {
+  const [recordingDuration, setRecordingDuration] = useState(DEFAULT_RECORDING_DURATION)
+  
   const {
     status,
     statusMessage,
@@ -24,7 +29,7 @@ export function KeytapVisualizer() {
     startRecording,
     initializeAudio,
     recalculateAveragedWaveform,
-  } = useAudioRecorder(RECORDING_DURATION)
+  } = useAudioRecorder(recordingDuration)
 
   const [offsetInput, setOffsetInput] = useState(windowOffsetMs)
   const [peakAlignInput, setPeakAlignInput] = useState(peakAlignEnabled)
@@ -60,6 +65,14 @@ export function KeytapVisualizer() {
     setPeakAlignInput(e.target.checked)
   }
 
+  const handleDurationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = parseInt(e.target.value, 10)
+    if (!isNaN(value)) {
+      const clampedValue = Math.max(MIN_RECORDING_DURATION, Math.min(MAX_RECORDING_DURATION, value))
+      setRecordingDuration(clampedValue)
+    }
+  }
+
   const handleOffsetApply = () => {
     recalculateAveragedWaveform(offsetInput, peakAlignInput)
   }
@@ -71,12 +84,28 @@ export function KeytapVisualizer() {
         キーボードのタイプ音を測定するツール
       </p>
 
+      <div className={styles.recordingSettings}>
+        <label htmlFor="durationInput">録音時間:</label>
+        <input
+          id="durationInput"
+          type="number"
+          min={MIN_RECORDING_DURATION}
+          max={MAX_RECORDING_DURATION}
+          step={500}
+          value={recordingDuration}
+          onChange={handleDurationChange}
+          disabled={isRecording}
+          className={styles.durationInput}
+        />
+        <span className={styles.durationUnit}>ms ({(recordingDuration / 1000).toFixed(1)}秒)</span>
+      </div>
+
       <div className={styles.controlGroup}>
         <RecordButton
           isRecording={isRecording}
           disabled={!canRecord || isRecording}
           onClick={handleRecordClick}
-          recordingDuration={RECORDING_DURATION}
+          recordingDuration={recordingDuration}
         />
         {isRecording && (
           <span className={styles.keyTapCounter}>
@@ -103,6 +132,11 @@ export function KeytapVisualizer() {
       {/* 音声特徴量の表示 */}
       {status === 'completed' && averagedWaveform && (
         <AudioFeaturesDisplay waveformData={averagedWaveform} />
+      )}
+
+      {/* FFTスペクトル解析 */}
+      {status === 'completed' && averagedWaveform && (
+        <SpectrumDisplay waveformData={averagedWaveform} />
       )}
 
       {status === 'completed' && keyTapCount > 0 && (

@@ -138,7 +138,7 @@ function nearestPowerOfTwo(n: number): number {
   return Math.pow(2, Math.max(9, Math.min(power, 14))) // 512〜16384の範囲
 }
 
-export function useAudioFeatures(waveformData: Float32Array | null, sampleRate = 44100): AudioFeatures {
+export function useAudioFeatures(waveformData: Float32Array | null, sampleRate = 48000): AudioFeatures {
   return useMemo(() => {
     const nullFeatures: AudioFeatures = {
       rms: null,

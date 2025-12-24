@@ -4,7 +4,7 @@ export type RecordingStatus = 'idle' | 'recording' | 'completed' | 'error'
 
 // 同期加算の設定
 const DEFAULT_WINDOW_OFFSET_MS = 5   // デフォルトのキータップ前オフセット (ms)
-const SAMPLE_RATE = 44100    // サンプルレート (Hz)
+const SAMPLE_RATE = 48000    // サンプルレート (Hz)
 const PEAK_SEARCH_WINDOW_MS = 50  // ピーク検出用の検索範囲 (ms)
 const MEASUREMENT_AUDIO_PEAK_OFFSET_MS = 10 // ピーク同期時のピークオフセット (ms)
 const MEASUREMENT_AUDIO_PERIOD_MS = 100 // ピーク同期時の周期 (ms)

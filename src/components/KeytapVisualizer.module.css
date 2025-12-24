@@ -19,6 +19,48 @@
   margin-bottom: 30px;
 }
 
+.recordingSettings {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.recordingSettings label {
+  font-weight: bold;
+  color: #333;
+}
+
+.durationInput {
+  width: 100px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.durationInput:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.durationInput:disabled {
+  background-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.durationUnit {
+  font-size: 14px;
+  color: #666;
+}
+
 .controlGroup {
   margin-bottom: 20px;
   display: flex;

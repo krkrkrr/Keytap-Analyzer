@@ -17,6 +17,49 @@
   border-bottom: 1px solid #e0e0e0;
 }
 
+.headerControls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.scaleToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scaleLabel {
+  font-size: 13px;
+  color: #666;
+}
+
+.scaleButton {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.scaleButton:hover {
+  background-color: #f0f0f0;
+}
+
+.scaleButtonActive {
+  color: #fff;
+  background-color: #2196F3;
+  border-color: #2196F3;
+}
+
+.scaleButtonActive:hover {
+  background-color: #1976D2;
+}
+
 .playButton {
   padding: 8px 16px;
   font-size: 14px;
