@@ -291,6 +291,16 @@ export function KeytapVisualizer() {
         <SpectrumDisplay waveformData={averagedWaveform} title="アタック音のスペクトル" />
       )}
 
+      {/* リリース音の音声特徴量 */}
+      {status === 'completed' && releaseWaveform && (
+        <AudioFeaturesDisplay waveformData={releaseWaveform} title="リリース音の特徴量" />
+      )}
+
+      {/* リリース音のFFTスペクトル解析 */}
+      {status === 'completed' && releaseWaveform && (
+        <SpectrumDisplay waveformData={releaseWaveform} title="リリース音のスペクトル" />
+      )}
+
       {status === 'completed' && keyTapCount > 0 && (
         <div className={styles.offsetControl}>
           <h4 className={styles.controlTitle}>アタック音設定</h4>
