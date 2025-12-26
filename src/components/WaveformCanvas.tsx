@@ -116,7 +116,12 @@ export function WaveformCanvas({ recordingData, isRecording = false, progress = 
       const channelData = audioBuffer.getChannelData(0)
       
       // 波形データをコピー（音量を調整）
-      const maxAmplitude = Math.max(...Array.from(recordingData).map(Math.abs))
+      // 大きな配列でスタックオーバーフローを避けるためループで最大値を計算
+      let maxAmplitude = 0
+      for (let i = 0; i < recordingData.length; i++) {
+        const absVal = Math.abs(recordingData[i])
+        if (absVal > maxAmplitude) maxAmplitude = absVal
+      }
       const gain = maxAmplitude > 0 ? 0.8 / maxAmplitude : 1
       console.log('最大振幅:', maxAmplitude, 'ゲイン:', gain)
       
