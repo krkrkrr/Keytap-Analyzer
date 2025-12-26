@@ -5,6 +5,7 @@ const SAMPLE_RATE = 48000
 
 interface SpectrumDisplayProps {
   waveformData: Float32Array | null
+  title?: string
 }
 
 // FFT実装（Cooley-Tukey algorithm）
@@ -129,7 +130,7 @@ function getColor(value: number, min: number, max: number): string {
   return `rgb(${r}, ${g}, ${b})`
 }
 
-export function SpectrumDisplay({ waveformData }: SpectrumDisplayProps) {
+export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumDisplayProps) {
   const spectrumCanvasRef = useRef<HTMLCanvasElement>(null)
   const spectrogramCanvasRef = useRef<HTMLCanvasElement>(null)
   const [fftSize, setFftSize] = useState(2048)
@@ -391,7 +392,7 @@ export function SpectrumDisplay({ waveformData }: SpectrumDisplayProps) {
 
   return (
     <div className={styles.container}>
-      <h3>FFT解析</h3>
+      <h3>{title}</h3>
       
       <div className={styles.controls}>
         <div className={styles.controlGroup}>

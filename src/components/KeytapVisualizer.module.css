@@ -95,6 +95,14 @@
   gap: 12px;
 }
 
+.controlTitle {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 16px;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 8px;
+}
+
 .offsetRow {
   display: flex;
   align-items: center;

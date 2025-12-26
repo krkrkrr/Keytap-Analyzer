@@ -4,6 +4,7 @@ import styles from './AudioFeatures.module.css'
 
 interface AudioFeaturesDisplayProps {
   waveformData: Float32Array | null
+  title?: string
 }
 
 const CHROMA_LABELS = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B']
@@ -16,7 +17,7 @@ function linearToDb(value: number): number {
   return 20 * Math.log10(absValue)
 }
 
-export function AudioFeaturesDisplay({ waveformData }: AudioFeaturesDisplayProps) {
+export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }: AudioFeaturesDisplayProps) {
   const features = useAudioFeatures(waveformData)
 
   // 波形データの統計情報を計算
@@ -127,7 +128,7 @@ export function AudioFeaturesDisplay({ waveformData }: AudioFeaturesDisplayProps
 
   return (
     <div className={styles.container}>
-      <h3 className={styles.title}>音声特徴量 (Meyda)</h3>
+      <h3 className={styles.title}>{title} (Meyda)</h3>
 
       {/* 波形データ統計情報 */}
       {waveformStats && (

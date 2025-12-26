@@ -11,6 +11,7 @@ interface AveragedWaveformProps {
   keyTapCount: number
   windowOffsetMs?: number
   peakAlignEnabled?: boolean
+  title?: string
 }
 
 // リニア値をdBに変換（0を避けるため最小値を設定）
@@ -21,7 +22,7 @@ function linearToDb(value: number, minDb: number = -60): number {
   return Math.max(db, minDb)
 }
 
-export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5, peakAlignEnabled = false }: AveragedWaveformProps) {
+export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5, peakAlignEnabled = false, title = '同期加算平均波形' }: AveragedWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null)
@@ -376,7 +377,7 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
   return (
     <div className={styles.canvasContainer}>
       <div className={styles.canvasHeader}>
-        <h3 style={{ margin: 0, color: '#4CAF50' }}>📊 同期加算平均波形</h3>
+        <h3 style={{ margin: 0, color: '#4CAF50' }}>📊 {title}</h3>
         <div className={styles.headerControls}>
           <div className={styles.scaleToggle}>
             <span className={styles.scaleLabel}>縦軸:</span>
