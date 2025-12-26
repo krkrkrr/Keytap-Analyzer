@@ -168,3 +168,180 @@
   font-size: 12px;
   color: #666;
 }
+
+/* タブメニュー */
+.tabContainer {
+  margin-top: 20px;
+}
+
+.tabList {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e9ecef;
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 12px 24px;
+  background-color: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  color: #4CAF50;
+  background-color: #f8f9fa;
+}
+
+.tabActive {
+  color: #4CAF50;
+  border-bottom-color: #4CAF50;
+}
+
+.tabPanel {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 新規タブのパネル */
+.newMeasurementPanel {
+  text-align: center;
+  padding: 20px;
+}
+
+.newMeasurementPanel h3 {
+  color: #4CAF50;
+  margin: 0 0 8px 0;
+}
+
+.newMeasurementPanel p {
+  color: #888;
+  margin: 0 0 20px 0;
+}
+
+/* 解析タブのレイアウト */
+.analysisContent {
+  display: flex;
+  gap: 20px;
+}
+
+.measurementList {
+  min-width: 250px;
+  max-width: 300px;
+  background: #1a1a1a;
+  border-radius: 8px;
+  padding: 12px;
+  flex-shrink: 0;
+}
+
+.measurementList h4 {
+  margin: 0 0 12px 0;
+  color: #888;
+  font-size: 0.9rem;
+  border-bottom: 1px solid #333;
+  padding-bottom: 8px;
+}
+
+.measurementItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: #252525;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.measurementItem:hover {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+.measurementItemSelected {
+  border-color: #4CAF50 !important;
+  background: #1a2a1a;
+}
+
+.measurementNameInput {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+  width: calc(100% - 24px);
+}
+
+.measurementNameInput:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.measurementNameInput:focus {
+  background: rgba(255,255,255,0.1);
+  outline: none;
+}
+
+.measurementInfo {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.measurementDeleteBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.measurementItem:hover .measurementDeleteBtn {
+  opacity: 1;
+}
+
+.measurementDeleteBtn:hover {
+  background: #ff4444;
+  color: #fff;
+}
+
+.measurementAnalysis {
+  flex: 1;
+  min-width: 0;
+}
+
+.measurementAnalysis h3 {
+  margin: 0 0 16px 0;
+  color: #4CAF50;
+  font-size: 1.1rem;
+}
+
+.settingsSection {
+  margin-bottom: 20px;
+}
+
+.settingsGrid {
+  display: grid;
+  gap: 16px;
+}
