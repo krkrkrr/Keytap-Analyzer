@@ -62,50 +62,6 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
   }, [waveformData])
 
   // サンプルデータ（等間隔で10個 + ピーク周辺）
-  const sampleData = useMemo(() => {
-    if (!waveformData || waveformData.length === 0 || !waveformStats) return []
-
-    const samples: { index: number; timeMs: number; value: number; dB: number; label: string }[] = []
-    const step = Math.floor(waveformData.length / 10)
-    
-    // 等間隔サンプル
-    for (let i = 0; i < 10; i++) {
-      const index = i * step
-      if (index < waveformData.length) {
-        const value = waveformData[index]
-        samples.push({
-          index,
-          timeMs: (index / SAMPLE_RATE) * 1000,
-          value,
-          dB: linearToDb(value),
-          label: `Sample ${i + 1}`,
-        })
-      }
-    }
-
-    // ピーク位置
-    const peakValue = waveformData[waveformStats.peakIndex]
-    samples.push({
-      index: waveformStats.peakIndex,
-      timeMs: waveformStats.peakTimeMs,
-      value: peakValue,
-      dB: linearToDb(peakValue),
-      label: '⭐ Peak',
-    })
-
-    // 最後のサンプル
-    const lastIndex = waveformData.length - 1
-    samples.push({
-      index: lastIndex,
-      timeMs: (lastIndex / SAMPLE_RATE) * 1000,
-      value: waveformData[lastIndex],
-      dB: linearToDb(waveformData[lastIndex]),
-      label: 'Last',
-    })
-
-    return samples.sort((a, b) => a.index - b.index)
-  }, [waveformData, waveformStats])
-
   if (!waveformData) {
     return null
   }
@@ -183,37 +139,6 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
                 <td>Index: {waveformStats.peakIndex}</td>
                 <td>{waveformStats.peakTimeMs.toFixed(2)} ms</td>
               </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* サンプルデータ表 */}
-      {sampleData.length > 0 && (
-        <div className={styles.section}>
-          <h4 className={styles.sectionTitle}>📋 サンプルデータ</h4>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>ラベル</th>
-                <th>Index</th>
-                <th>Time (ms)</th>
-                <th>Value (Linear)</th>
-                <th>Value (dB)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sampleData.map((sample, i) => (
-                <tr key={i} style={sample.label.includes('Peak') ? { backgroundColor: '#fff3cd' } : undefined}>
-                  <td>{sample.label}</td>
-                  <td>{sample.index.toLocaleString()}</td>
-                  <td>{sample.timeMs.toFixed(2)}</td>
-                  <td className={styles.featureValue}>{sample.value.toExponential(4)}</td>
-                  <td className={styles.featureValue}>
-                    {isFinite(sample.dB) ? sample.dB.toFixed(2) : '-∞'}
-                  </td>
-                </tr>
-              ))}
             </tbody>
           </table>
         </div>
