@@ -188,18 +188,24 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
             <div className={styles.barkBands}>
               <span className={styles.label}>Bark Bands (24):</span>
               <div className={styles.barChart}>
-                {Array.from(features.loudness.specific).map((value, i) => {
-                  const maxValue = Math.max(...Array.from(features.loudness!.specific))
-                  const height = maxValue > 0 ? (value / maxValue) * 100 : 0
-                  return (
-                    <div
-                      key={i}
-                      className={styles.bar}
-                      style={{ height: `${height}%` }}
-                      title={`Band ${i + 1}: ${value.toFixed(4)}`}
-                    />
-                  )
-                })}
+                {(() => {
+                  const specificArray = Array.from(features.loudness!.specific)
+                  let maxValue = 0
+                  for (const v of specificArray) {
+                    if (v > maxValue) maxValue = v
+                  }
+                  return specificArray.map((value, i) => {
+                    const height = maxValue > 0 ? (value / maxValue) * 100 : 0
+                    return (
+                      <div
+                        key={i}
+                        className={styles.bar}
+                        style={{ height: `${height}%` }}
+                        title={`Band ${i + 1}: ${value.toFixed(4)}`}
+                      />
+                    )
+                  })
+                })()}
               </div>
             </div>
           </div>

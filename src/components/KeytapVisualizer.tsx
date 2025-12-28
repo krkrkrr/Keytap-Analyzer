@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import { WaveformCanvas } from './WaveformCanvas'
 import { AveragedWaveform } from './AveragedWaveform'
@@ -6,25 +6,48 @@ import { AudioFeaturesDisplay } from './AudioFeaturesDisplay'
 import { SpectrumDisplay } from './SpectrumDisplay'
 import { StatusMessage } from './StatusMessage'
 import { RecordButton } from './RecordButton'
+import { 
+  encodeWav, 
+  createPaxTar, 
+  parseTar, 
+  decodeWav, 
+  parseTimestampsCsv,
+  type MeasurementMetadata 
+} from '../utils/audioExport'
 import styles from './KeytapVisualizer.module.css'
+
+const SAMPLE_RATE = 48000
 
 const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
 const MIN_RECORDING_DURATION = 1000 // 最小1秒
 const MAX_RECORDING_DURATION = 30000 // 最大30秒
 
-type TabType = 'waveform' | 'analysis' | 'settings'
+type TabType = 'waveform' | 'analysis'
+
+// ピーク検索ウィンドウ（ms）
+const PEAK_SEARCH_WINDOW_MS = 50
 
 // 測定結果の型定義
 interface MeasurementResult {
   id: number
   name: string
   timestamp: Date
+  recordingData: Float32Array | null  // 同期加算前の録音データ
   attackWaveform: Float32Array | null
   releaseWaveform: Float32Array | null
   combinedWaveform: Float32Array | null
   keyTapCount: number
   keyUpCount: number
+  keyDownTimestamps: number[]  // キーダウンのタイムスタンプ (ms)
+  keyUpTimestamps: number[]    // キーアップのタイムスタンプ (ms)
   peakIntervalMs: number
+  recordingDurationMs: number  // 録音時間 (ms)
+  // 測定設定
+  waveformLengthMs: number     // 波形長 (ms)
+  attackOffsetMs: number       // アタック音オフセット (ms)
+  attackPeakAlign: boolean     // アタック音ピーク同期
+  releaseOffsetMs: number      // リリース音オフセット (ms)
+  releasePeakAlign: boolean    // リリース音ピーク同期
 }
 
 export function KeytapVisualizer() {
@@ -33,16 +56,30 @@ export function KeytapVisualizer() {
   const [measurementHistory, setMeasurementHistory] = useState<MeasurementResult[]>([])
   const [selectedMeasurementId, setSelectedMeasurementId] = useState<number | null>(null)
   const [nextMeasurementId, setNextMeasurementId] = useState(1)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // 設定モーダル用の状態
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+  const [editingMeasurementId, setEditingMeasurementId] = useState<number | null>(null)
+  const [editWaveformLengthInput, setEditWaveformLengthInput] = useState(100)
+  const [editPeakIntervalInput, setEditPeakIntervalInput] = useState(100)
+  const [editAttackOffsetInput, setEditAttackOffsetInput] = useState(10)
+  const [editAttackPeakAlignInput, setEditAttackPeakAlignInput] = useState(true)
+  const [editReleaseOffsetInput, setEditReleaseOffsetInput] = useState(10)
+  const [editReleasePeakAlignInput, setEditReleasePeakAlignInput] = useState(true)
   
   const {
     status,
     statusMessage,
     recordingData,
+    finalRecordingData,
     recordingProgress,
     isRecording,
     canRecord,
     keyTapCount,
     keyUpCount,
+    keyDownTimestamps,
+    keyUpTimestamps,
     averagedWaveform,
     releaseWaveform,
     combinedWaveform,
@@ -53,47 +90,11 @@ export function KeytapVisualizer() {
     waveformLengthMs,
     startRecording,
     initializeAudio,
-    recalculateAveragedWaveform,
-    recalculateReleaseWaveform,
-    recalculateCombinedWaveform,
-    setWaveformLengthMs,
   } = useAudioRecorder(recordingDuration)
-
-  const [offsetInput, setOffsetInput] = useState(windowOffsetMs)
-  const [releaseOffsetInput, setReleaseOffsetInput] = useState(releaseOffsetMs)
-  const [peakAlignInput, setPeakAlignInput] = useState(peakAlignEnabled)
-  const [releasePeakAlignInput, setReleasePeakAlignInput] = useState(false)
-  const [peakIntervalInput, setPeakIntervalInput] = useState(peakIntervalMs)
-  const [waveformLengthInput, setWaveformLengthInput] = useState(waveformLengthMs)
 
   useEffect(() => {
     initializeAudio()
   }, [initializeAudio])
-
-  // windowOffsetMsが変更されたらinputも更新
-  useEffect(() => {
-    setOffsetInput(windowOffsetMs)
-  }, [windowOffsetMs])
-
-  // releaseOffsetMsが変更されたらinputも更新
-  useEffect(() => {
-    setReleaseOffsetInput(releaseOffsetMs)
-  }, [releaseOffsetMs])
-
-  // peakAlignEnabledが変更されたらinputも更新
-  useEffect(() => {
-    setPeakAlignInput(peakAlignEnabled)
-  }, [peakAlignEnabled])
-
-  // peakIntervalMsが変更されたらinputも更新
-  useEffect(() => {
-    setPeakIntervalInput(peakIntervalMs)
-  }, [peakIntervalMs])
-
-  // waveformLengthMsが変更されたらinputも更新
-  useEffect(() => {
-    setWaveformLengthInput(waveformLengthMs)
-  }, [waveformLengthMs])
 
   // 測定IDを追跡（同じ録音セッションで重複追加を防ぐ）
   const [lastRecordedId, setLastRecordedId] = useState<string | null>(null)
@@ -101,7 +102,7 @@ export function KeytapVisualizer() {
   // 録音完了時に測定結果を履歴に追加
   useEffect(() => {
     // 録音完了かつ波形データが揃っている場合のみ
-    if (status === 'completed' && averagedWaveform && combinedWaveform) {
+    if (status === 'completed' && averagedWaveform && combinedWaveform && finalRecordingData) {
       // 同じデータの重複追加を防ぐ（キー数+波形長+ピーク間隔で識別）
       const recordId = `${keyTapCount}-${keyUpCount}-${averagedWaveform.length}-${peakIntervalMs}`
       if (lastRecordedId === recordId) {
@@ -132,12 +133,22 @@ export function KeytapVisualizer() {
           id: nextMeasurementId,
           name: `測定 ${nextMeasurementId}`,
           timestamp: new Date(),
+          recordingData: new Float32Array(finalRecordingData),
           attackWaveform: new Float32Array(averagedWaveform),
           releaseWaveform: releaseWaveform ? new Float32Array(releaseWaveform) : null,
           combinedWaveform: new Float32Array(combinedWaveform),
           keyTapCount,
           keyUpCount,
+          keyDownTimestamps: [...keyDownTimestamps],
+          keyUpTimestamps: [...keyUpTimestamps],
           peakIntervalMs,
+          recordingDurationMs: recordingDuration,
+          // 測定設定（現在のフック設定を保存）
+          waveformLengthMs,
+          attackOffsetMs: windowOffsetMs,
+          attackPeakAlign: peakAlignEnabled,
+          releaseOffsetMs,
+          releasePeakAlign: false, // デフォルトはfalse
         }
         setMeasurementHistory(prev => [...prev, newMeasurement])
         setSelectedMeasurementId(nextMeasurementId)
@@ -145,10 +156,300 @@ export function KeytapVisualizer() {
       }
       setLastRecordedId(recordId)
     }
-  }, [status, averagedWaveform, combinedWaveform, releaseWaveform, keyTapCount, keyUpCount, peakIntervalMs, nextMeasurementId, lastRecordedId, measurementHistory])
+  }, [status, averagedWaveform, combinedWaveform, releaseWaveform, finalRecordingData, keyTapCount, keyUpCount, keyDownTimestamps, keyUpTimestamps, peakIntervalMs, recordingDuration, waveformLengthMs, windowOffsetMs, peakAlignEnabled, releaseOffsetMs, nextMeasurementId, lastRecordedId, measurementHistory])
 
   // 選択中の測定結果を取得
   const selectedMeasurement = measurementHistory.find(m => m.id === selectedMeasurementId) || null
+
+  // ピーク位置を検出するユーティリティ関数
+  const findPeakIndex = useCallback((data: Float32Array, searchRangeSamples?: number): number => {
+    let maxValue = 0
+    let peakIndex = 0
+    const searchEnd = searchRangeSamples ? Math.min(searchRangeSamples, data.length) : data.length
+    for (let i = 0; i < searchEnd; i++) {
+      const absValue = Math.abs(data[i])
+      if (absValue > maxValue) {
+        maxValue = absValue
+        peakIndex = i
+      }
+    }
+    return peakIndex
+  }, [])
+
+  // アタック音の同期加算処理（測定データ用）
+  const calculateMeasurementAttackWaveform = useCallback((
+    audioData: Float32Array,
+    keyDownTimestamps: number[],
+    offsetMs: number,
+    peakAlign: boolean,
+    targetLengthMs: number
+  ): Float32Array | null => {
+    if (keyDownTimestamps.length < 3) {
+      return null
+    }
+
+    const trimmedDownTimestamps = keyDownTimestamps.slice(1, -1)
+    const windowOffsetSamples = Math.floor((offsetMs / 1000) * SAMPLE_RATE)
+    const peakSearchSamples = Math.floor((PEAK_SEARCH_WINDOW_MS / 1000) * SAMPLE_RATE)
+    const targetLengthSamples = Math.floor((targetLengthMs / 1000) * SAMPLE_RATE)
+    const rawWindowSize = targetLengthSamples + windowOffsetSamples + peakSearchSamples
+
+    if (peakAlign) {
+      const windows: { data: Float32Array; peakIndex: number }[] = []
+      
+      for (const timestamp of trimmedDownTimestamps) {
+        const sampleIndex = Math.floor((timestamp / 1000) * SAMPLE_RATE)
+        const windowStart = sampleIndex - windowOffsetSamples
+        const windowEnd = Math.min(windowStart + rawWindowSize, audioData.length)
+
+        if (windowStart >= 0 && windowEnd > windowStart) {
+          const windowData = audioData.slice(windowStart, windowEnd)
+          const peakIndex = findPeakIndex(windowData, peakSearchSamples)
+          windows.push({ data: windowData, peakIndex })
+        }
+      }
+
+      if (windows.length === 0) return null
+
+      const peakPositionInOutput = Math.floor(targetLengthSamples * 0.1)
+      const outputWindowSize = targetLengthSamples
+      const summedWaveform = new Float32Array(outputWindowSize)
+      
+      for (const window of windows) {
+        const shift = peakPositionInOutput - window.peakIndex
+        for (let j = 0; j < outputWindowSize; j++) {
+          const sourceIndex = j - shift
+          if (sourceIndex >= 0 && sourceIndex < window.data.length) {
+            summedWaveform[j] += window.data[sourceIndex]
+          }
+        }
+      }
+
+      for (let i = 0; i < outputWindowSize; i++) {
+        summedWaveform[i] /= windows.length
+      }
+
+      return summedWaveform
+    } else {
+      const outputWindowSize = targetLengthSamples
+      const summedWaveform = new Float32Array(outputWindowSize)
+      let validWindowCount = 0
+
+      for (const timestamp of trimmedDownTimestamps) {
+        const sampleIndex = Math.floor((timestamp / 1000) * SAMPLE_RATE)
+        const windowStart = sampleIndex - windowOffsetSamples
+
+        if (windowStart >= 0) {
+          for (let j = 0; j < outputWindowSize; j++) {
+            const sourceIndex = windowStart + j
+            if (sourceIndex < audioData.length) {
+              summedWaveform[j] += audioData[sourceIndex]
+            }
+          }
+          validWindowCount++
+        }
+      }
+
+      if (validWindowCount > 0) {
+        for (let i = 0; i < outputWindowSize; i++) {
+          summedWaveform[i] /= validWindowCount
+        }
+        return summedWaveform
+      }
+      return null
+    }
+  }, [findPeakIndex])
+
+  // リリース音の同期加算処理（測定データ用）
+  const calculateMeasurementReleaseWaveform = useCallback((
+    audioData: Float32Array,
+    keyUpTimestamps: number[],
+    offsetMs: number,
+    peakAlign: boolean,
+    targetLengthMs: number
+  ): Float32Array | null => {
+    if (keyUpTimestamps.length < 2) {
+      return null
+    }
+
+    const trimmedUpTimestamps = keyUpTimestamps.length >= 3 
+      ? keyUpTimestamps.slice(1, -1) 
+      : keyUpTimestamps.slice(0, 1)
+    
+    const windowOffsetSamples = Math.floor((offsetMs / 1000) * SAMPLE_RATE)
+    const peakSearchSamples = Math.floor((PEAK_SEARCH_WINDOW_MS / 1000) * SAMPLE_RATE)
+    const targetLengthSamples = Math.floor((targetLengthMs / 1000) * SAMPLE_RATE)
+    const rawWindowSize = targetLengthSamples + windowOffsetSamples + peakSearchSamples
+
+    if (peakAlign) {
+      const windows: { data: Float32Array; peakIndex: number }[] = []
+      
+      for (const timestamp of trimmedUpTimestamps) {
+        const sampleIndex = Math.floor((timestamp / 1000) * SAMPLE_RATE)
+        const windowStart = sampleIndex - windowOffsetSamples
+        const windowEnd = Math.min(windowStart + rawWindowSize, audioData.length)
+
+        if (windowStart >= 0 && windowEnd > windowStart) {
+          const windowData = audioData.slice(windowStart, windowEnd)
+          const peakIndex = findPeakIndex(windowData, peakSearchSamples)
+          windows.push({ data: windowData, peakIndex })
+        }
+      }
+
+      if (windows.length === 0) return null
+
+      const peakPositionInOutput = Math.floor(targetLengthSamples * 0.1)
+      const outputWindowSize = targetLengthSamples
+      const summedWaveform = new Float32Array(outputWindowSize)
+      
+      for (const window of windows) {
+        const shift = peakPositionInOutput - window.peakIndex
+        for (let j = 0; j < outputWindowSize; j++) {
+          const sourceIndex = j - shift
+          if (sourceIndex >= 0 && sourceIndex < window.data.length) {
+            summedWaveform[j] += window.data[sourceIndex]
+          }
+        }
+      }
+
+      for (let i = 0; i < outputWindowSize; i++) {
+        summedWaveform[i] /= windows.length
+      }
+
+      return summedWaveform
+    } else {
+      const outputWindowSize = targetLengthSamples
+      const summedWaveform = new Float32Array(outputWindowSize)
+      let validWindowCount = 0
+
+      for (const timestamp of trimmedUpTimestamps) {
+        const sampleIndex = Math.floor((timestamp / 1000) * SAMPLE_RATE)
+        const windowStart = sampleIndex - windowOffsetSamples
+
+        if (windowStart >= 0) {
+          for (let j = 0; j < outputWindowSize; j++) {
+            const sourceIndex = windowStart + j
+            if (sourceIndex < audioData.length) {
+              summedWaveform[j] += audioData[sourceIndex]
+            }
+          }
+          validWindowCount++
+        }
+      }
+
+      if (validWindowCount > 0) {
+        for (let i = 0; i < outputWindowSize; i++) {
+          summedWaveform[i] /= validWindowCount
+        }
+        return summedWaveform
+      }
+      return null
+    }
+  }, [findPeakIndex])
+
+  // 測定データの合成波形を再計算するユーティリティ関数
+  const calculateMeasurementCombinedWaveform = useCallback((
+    attackWaveform: Float32Array,
+    releaseWaveform: Float32Array,
+    intervalMs: number
+  ): Float32Array => {
+    const attackPeakIndex = findPeakIndex(attackWaveform)
+    const releasePeakIndex = findPeakIndex(releaseWaveform)
+    
+    const intervalSamples = Math.floor((intervalMs / 1000) * SAMPLE_RATE)
+    
+    const releaseStartOffset = attackPeakIndex + intervalSamples - releasePeakIndex
+    const combinedLength = Math.max(
+      attackWaveform.length,
+      releaseStartOffset + releaseWaveform.length
+    )
+    
+    const combined = new Float32Array(combinedLength)
+    
+    for (let i = 0; i < attackWaveform.length; i++) {
+      combined[i] = attackWaveform[i]
+    }
+    
+    for (let i = 0; i < releaseWaveform.length; i++) {
+      const targetIndex = releaseStartOffset + i
+      if (targetIndex >= 0 && targetIndex < combinedLength) {
+        combined[targetIndex] += releaseWaveform[i]
+      }
+    }
+
+    return combined
+  }, [findPeakIndex])
+
+  // 測定データの設定を開く
+  const handleOpenMeasurementSettings = useCallback((measurement: MeasurementResult) => {
+    setEditingMeasurementId(measurement.id)
+    setEditWaveformLengthInput(measurement.waveformLengthMs ?? 100)
+    setEditPeakIntervalInput(measurement.peakIntervalMs)
+    setEditAttackOffsetInput(measurement.attackOffsetMs ?? 10)
+    setEditAttackPeakAlignInput(measurement.attackPeakAlign ?? true)
+    setEditReleaseOffsetInput(measurement.releaseOffsetMs ?? 10)
+    setEditReleasePeakAlignInput(measurement.releasePeakAlign ?? false)
+    setSettingsModalOpen(true)
+  }, [])
+
+  // 測定データの設定を適用
+  const handleApplyMeasurementSettings = useCallback(() => {
+    if (editingMeasurementId === null) return
+    
+    const measurement = measurementHistory.find(m => m.id === editingMeasurementId)
+    if (!measurement || !measurement.recordingData) {
+      setSettingsModalOpen(false)
+      return
+    }
+
+    // アタック音を再計算
+    const newAttackWaveform = calculateMeasurementAttackWaveform(
+      measurement.recordingData,
+      measurement.keyDownTimestamps,
+      editAttackOffsetInput,
+      editAttackPeakAlignInput,
+      editWaveformLengthInput
+    )
+
+    // リリース音を再計算
+    const newReleaseWaveform = calculateMeasurementReleaseWaveform(
+      measurement.recordingData,
+      measurement.keyUpTimestamps,
+      editReleaseOffsetInput,
+      editReleasePeakAlignInput,
+      editWaveformLengthInput
+    )
+
+    // 合成波形を再計算
+    let newCombinedWaveform: Float32Array | null = null
+    if (newAttackWaveform && newReleaseWaveform) {
+      newCombinedWaveform = calculateMeasurementCombinedWaveform(
+        newAttackWaveform,
+        newReleaseWaveform,
+        editPeakIntervalInput
+      )
+    }
+
+    // 測定データを更新
+    setMeasurementHistory(prev => prev.map(m => 
+      m.id === editingMeasurementId 
+        ? { 
+            ...m, 
+            attackWaveform: newAttackWaveform,
+            releaseWaveform: newReleaseWaveform,
+            combinedWaveform: newCombinedWaveform,
+            peakIntervalMs: editPeakIntervalInput,
+            waveformLengthMs: editWaveformLengthInput,
+            attackOffsetMs: editAttackOffsetInput,
+            attackPeakAlign: editAttackPeakAlignInput,
+            releaseOffsetMs: editReleaseOffsetInput,
+            releasePeakAlign: editReleasePeakAlignInput,
+          } 
+        : m
+    ))
+
+    setSettingsModalOpen(false)
+  }, [editingMeasurementId, editWaveformLengthInput, editPeakIntervalInput, editAttackOffsetInput, editAttackPeakAlignInput, editReleaseOffsetInput, editReleasePeakAlignInput, measurementHistory, calculateMeasurementAttackWaveform, calculateMeasurementReleaseWaveform, calculateMeasurementCombinedWaveform])
 
   // 測定結果を削除
   const handleDeleteMeasurement = useCallback((id: number) => {
@@ -166,57 +467,189 @@ export function KeytapVisualizer() {
     ))
   }, [])
 
+  // 測定データをtarファイルとしてエクスポート
+  const handleExportMeasurement = useCallback((measurement: MeasurementResult) => {
+    const files: { name: string; data: ArrayBuffer | string }[] = []
+    const baseName = measurement.name.replace(/[^a-zA-Z0-9_\-\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/g, '_')
+    
+    // タイムスタンプCSVを生成（keydown/keyupのペア形式）
+    const csvLines = ['timestamp_keydown,timestamp_keyup']
+    const maxLength = Math.max(measurement.keyDownTimestamps.length, measurement.keyUpTimestamps.length)
+    for (let i = 0; i < maxLength; i++) {
+      const keydown = measurement.keyDownTimestamps[i] ?? ''
+      const keyup = measurement.keyUpTimestamps[i] ?? ''
+      csvLines.push(`${keydown},${keyup}`)
+    }
+    const timestampsCsv = csvLines.join('\n')
+    
+    // メタデータJSON
+    const metadata: MeasurementMetadata = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      measurement: {
+        id: measurement.id,
+        name: measurement.name,
+        timestamp: measurement.timestamp.toISOString(),
+        keyTapCount: measurement.keyTapCount,
+        keyUpCount: measurement.keyUpCount,
+        peakIntervalMs: measurement.peakIntervalMs,
+      },
+      audio: {
+        sampleRate: SAMPLE_RATE,
+        waveformLengthMs: waveformLengthMs,
+        recordingDurationMs: measurement.recordingDurationMs,
+      },
+      files: {
+        metadata: 'metadata.json',
+        recording: measurement.recordingData ? 'recording.wav' : '',
+        combinedWaveform: measurement.combinedWaveform ? 'combined.wav' : null,
+        timestamps: 'timestamps_keyevent.csv',
+      },
+    }
+    
+    files.push({
+      name: 'metadata.json',
+      data: JSON.stringify(metadata, null, 2),
+    })
+    
+    // タイムスタンプCSV
+    files.push({
+      name: 'timestamps_keyevent.csv',
+      data: timestampsCsv,
+    })
+    
+    // 録音データWAV
+    if (measurement.recordingData) {
+      files.push({
+        name: 'recording.wav',
+        data: encodeWav(measurement.recordingData, SAMPLE_RATE),
+      })
+    }
+    
+    // 合成波形WAV
+    if (measurement.combinedWaveform) {
+      files.push({
+        name: 'combined.wav',
+        data: encodeWav(measurement.combinedWaveform, SAMPLE_RATE),
+      })
+    }
+    
+    // PAX形式のtarファイルを作成
+    const tarBlob = createPaxTar(files)
+    
+    // ダウンロード
+    const url = URL.createObjectURL(tarBlob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${baseName}.keytapanalyzer.dat`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [waveformLengthMs])
+
+  // 測定データをtarファイルからインポート
+  const handleImportMeasurement = useCallback(async (file: File) => {
+    try {
+      const buffer = await file.arrayBuffer()
+      const files = parseTar(buffer)
+      
+      // メタデータを探す
+      const metadataFile = files.find(f => f.name === 'metadata.json')
+      if (!metadataFile) {
+        console.error('metadata.json not found in tar file')
+        alert('無効なファイル形式です: metadata.json が見つかりません')
+        return
+      }
+      
+      const metadataText = new TextDecoder().decode(metadataFile.data)
+      const metadata: MeasurementMetadata = JSON.parse(metadataText)
+      
+      // 録音データを読み込み
+      let recordingData: Float32Array | null = null
+      const recordingFile = files.find(f => f.name === 'recording.wav')
+      if (recordingFile) {
+        const decoded = decodeWav(recordingFile.data)
+        if (decoded) {
+          recordingData = decoded.samples
+        }
+      }
+      
+      // 合成波形を読み込み
+      let combinedWaveform: Float32Array | null = null
+      const combinedFile = files.find(f => f.name === 'combined.wav')
+      if (combinedFile) {
+        const decoded = decodeWav(combinedFile.data)
+        if (decoded) {
+          combinedWaveform = decoded.samples
+        }
+      }
+      
+      // タイムスタンプを読み込み
+      let keyDownTimestamps: number[] = []
+      let keyUpTimestamps: number[] = []
+      const timestampsFile = files.find(f => f.name === 'timestamps_keyevent.csv' || f.name === 'timestamps.csv')
+      if (timestampsFile) {
+        const csvText = new TextDecoder().decode(timestampsFile.data)
+        const parsed = parseTimestampsCsv(csvText)
+        keyDownTimestamps = parsed.keyDownTimestamps
+        keyUpTimestamps = parsed.keyUpTimestamps
+      }
+      
+      // 測定結果を作成
+      const newMeasurement: MeasurementResult = {
+        id: nextMeasurementId,
+        name: metadata.measurement.name || `インポート ${nextMeasurementId}`,
+        timestamp: new Date(metadata.measurement.timestamp),
+        recordingData,
+        attackWaveform: null, // インポートでは再計算しない
+        releaseWaveform: null,
+        combinedWaveform,
+        keyTapCount: metadata.measurement.keyTapCount,
+        keyUpCount: metadata.measurement.keyUpCount,
+        keyDownTimestamps,
+        keyUpTimestamps,
+        peakIntervalMs: metadata.measurement.peakIntervalMs,
+        recordingDurationMs: metadata.audio.recordingDurationMs || 4000,
+        // デフォルト設定
+        waveformLengthMs: metadata.audio.waveformLengthMs || 100,
+        attackOffsetMs: 10,
+        attackPeakAlign: true,
+        releaseOffsetMs: 10,
+        releasePeakAlign: false,
+      }
+      
+      setMeasurementHistory(prev => [...prev, newMeasurement])
+      setSelectedMeasurementId(nextMeasurementId)
+      setNextMeasurementId(prev => prev + 1)
+      setActiveTab('analysis')
+      
+      console.log('Measurement imported successfully:', newMeasurement.name)
+    } catch (error) {
+      console.error('Failed to import measurement:', error)
+      alert('ファイルの読み込みに失敗しました')
+    }
+  }, [nextMeasurementId])
+
+  // ファイル選択ハンドラー
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleImportMeasurement(file)
+    }
+    // 同じファイルを再選択できるようにリセット
+    e.target.value = ''
+  }, [handleImportMeasurement])
+
+  // インポートボタンクリックハンドラー
+  const handleImportClick = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
   const handleRecordClick = () => {
     if (!isRecording) {
       startRecording()
     }
-  }
-
-  const handleOffsetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value, 10)
-    if (!isNaN(value) && value >= 0) {
-      setOffsetInput(value)
-    }
-  }
-
-  const handlePeakAlignChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPeakAlignInput(e.target.checked)
-  }
-
-  const handleReleaseOffsetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value, 10)
-    if (!isNaN(value) && value >= 0) {
-      setReleaseOffsetInput(value)
-    }
-  }
-
-  const handleReleasePeakAlignChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setReleasePeakAlignInput(e.target.checked)
-  }
-
-  const handlePeakIntervalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value, 10)
-    if (!isNaN(value) && value >= 0) {
-      setPeakIntervalInput(value)
-    }
-  }
-
-  const handlePeakIntervalApply = () => {
-    recalculateCombinedWaveform(peakIntervalInput)
-  }
-
-  const handleWaveformLengthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value, 10)
-    if (!isNaN(value) && value >= 10 && value <= 500) {
-      setWaveformLengthInput(value)
-    }
-  }
-
-  const handleWaveformLengthApply = () => {
-    setWaveformLengthMs(waveformLengthInput)
-    // 波形長を変更したら再計算
-    recalculateAveragedWaveform(offsetInput, peakAlignInput)
-    recalculateReleaseWaveform(releaseOffsetInput, releasePeakAlignInput)
   }
 
   const handleDurationChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -225,14 +658,6 @@ export function KeytapVisualizer() {
       const clampedValue = Math.max(MIN_RECORDING_DURATION, Math.min(MAX_RECORDING_DURATION, value))
       setRecordingDuration(clampedValue)
     }
-  }
-
-  const handleOffsetApply = () => {
-    recalculateAveragedWaveform(offsetInput, peakAlignInput)
-  }
-
-  const handleReleaseOffsetApply = () => {
-    recalculateReleaseWaveform(releaseOffsetInput, releasePeakAlignInput)
   }
 
   return (
@@ -273,12 +698,6 @@ export function KeytapVisualizer() {
           >
             📊 解析
           </button>
-          <button
-            className={`${styles.tab} ${activeTab === 'settings' ? styles.tabActive : ''}`}
-            onClick={() => setActiveTab('settings')}
-          >
-            ⚙️ 設定
-          </button>
         </div>
 
         {/* 新規タブ */}
@@ -292,6 +711,26 @@ export function KeytapVisualizer() {
                 isRecording={isRecording}
                 progress={recordingProgress}
               />
+              
+              {/* 録音設定 */}
+              <div className={styles.settingsSection}>
+                <h4 className={styles.controlTitle}>録音設定</h4>
+                <div className={styles.settingsRow}>
+                  <label htmlFor="durationInput">録音時間:</label>
+                  <input
+                    id="durationInput"
+                    type="number"
+                    min={MIN_RECORDING_DURATION}
+                    max={MAX_RECORDING_DURATION}
+                    step={500}
+                    value={recordingDuration}
+                    onChange={handleDurationChange}
+                    disabled={isRecording}
+                    className={styles.settingsInput}
+                  />
+                  <span className={styles.settingsHint}>ms ({(recordingDuration / 1000).toFixed(1)}秒)</span>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -299,11 +738,29 @@ export function KeytapVisualizer() {
         {/* 解析タブ */}
         {activeTab === 'analysis' && (
           <div className={styles.tabPanel}>
+            {/* 隠しファイル入力 */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".dat,.tar"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
+            
             {measurementHistory.length > 0 ? (
               <div className={styles.analysisContent}>
                 {/* 測定履歴リスト */}
                 <div className={styles.measurementList}>
-                  <h4>測定履歴</h4>
+                  <div className={styles.measurementListHeader}>
+                    <h4>測定履歴</h4>
+                    <button 
+                      className={styles.importBtn}
+                      onClick={handleImportClick}
+                      title="測定データをインポート"
+                    >
+                      📂 読込
+                    </button>
+                  </div>
                   {measurementHistory.map((m) => (
                     <div 
                       key={m.id} 
@@ -320,15 +777,39 @@ export function KeytapVisualizer() {
                       <span className={styles.measurementInfo}>
                         {m.timestamp.toLocaleTimeString()} | {m.keyTapCount}回
                       </span>
-                      <button 
-                        className={styles.measurementDeleteBtn}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteMeasurement(m.id)
-                        }}
-                      >
-                        ✕
-                      </button>
+                      <div className={styles.measurementActions}>
+                        <button 
+                          className={styles.measurementSettingsBtn}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleOpenMeasurementSettings(m)
+                          }}
+                          title="測定用音声設定"
+                          disabled={!m.recordingData || m.keyDownTimestamps.length < 3}
+                        >
+                          ⚙️
+                        </button>
+                        <button 
+                          className={styles.measurementExportBtn}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleExportMeasurement(m)
+                          }}
+                          title="tarファイルとしてエクスポート"
+                        >
+                          💾
+                        </button>
+                        <button 
+                          className={styles.measurementDeleteBtn}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteMeasurement(m.id)
+                          }}
+                          title="削除"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -338,257 +819,221 @@ export function KeytapVisualizer() {
                   <div className={styles.measurementAnalysis}>
                     <h3>{selectedMeasurement.name}</h3>
                     
-                    {/* 波形表示 */}
-                    {selectedMeasurement.attackWaveform && (
-                      <AveragedWaveform 
-                        waveformData={selectedMeasurement.attackWaveform}
-                        keyTapCount={selectedMeasurement.keyTapCount}
-                        windowOffsetMs={0}
-                        peakAlignEnabled={true}
-                        title="アタック音 (KeyDown → KeyUp)"
-                      />
-                    )}
-
-                    {selectedMeasurement.releaseWaveform && (
-                      <AveragedWaveform 
-                        waveformData={selectedMeasurement.releaseWaveform}
-                        keyTapCount={selectedMeasurement.keyUpCount}
-                        windowOffsetMs={0}
-                        peakAlignEnabled={true}
-                        title="リリース音 (KeyUp → KeyDown)"
-                      />
-                    )}
-
-                    {selectedMeasurement.combinedWaveform && (
-                      <AveragedWaveform 
-                        waveformData={selectedMeasurement.combinedWaveform}
-                        keyTapCount={selectedMeasurement.keyTapCount}
-                        windowOffsetMs={0}
-                        peakAlignEnabled={true}
-                        title={`測定用音声 (アタック→${selectedMeasurement.peakIntervalMs}ms→リリース)`}
-                      />
-                    )}
-
-                    {/* 特徴量・スペクトル */}
+                    {/* 測定用音声（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.combinedWaveform && (
                       <>
-                        <AudioFeaturesDisplay 
-                          waveformData={selectedMeasurement.combinedWaveform} 
-                          title={`測定用音声の特徴量 (間隔: ${selectedMeasurement.peakIntervalMs}ms)`} 
-                        />
                         <SpectrumDisplay 
                           waveformData={selectedMeasurement.combinedWaveform} 
                           title="測定用音声のスペクトル" 
                         />
+                        <AudioFeaturesDisplay 
+                          waveformData={selectedMeasurement.combinedWaveform} 
+                          title={`測定用音声の特徴量 (間隔: ${selectedMeasurement.peakIntervalMs}ms)`} 
+                        />
+                        <AveragedWaveform 
+                          waveformData={selectedMeasurement.combinedWaveform}
+                          keyTapCount={selectedMeasurement.keyTapCount}
+                          windowOffsetMs={0}
+                          peakAlignEnabled={true}
+                          title={`測定用音声 (アタック→${selectedMeasurement.peakIntervalMs}ms→リリース)`}
+                        />
                       </>
                     )}
 
+                    {/* アタック音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.attackWaveform && (
                       <>
-                        <AudioFeaturesDisplay 
-                          waveformData={selectedMeasurement.attackWaveform} 
-                          title="アタック音の特徴量" 
-                        />
                         <SpectrumDisplay 
                           waveformData={selectedMeasurement.attackWaveform} 
                           title="アタック音のスペクトル" 
                         />
+                        <AudioFeaturesDisplay 
+                          waveformData={selectedMeasurement.attackWaveform} 
+                          title="アタック音の特徴量" 
+                        />
+                        <AveragedWaveform 
+                          waveformData={selectedMeasurement.attackWaveform}
+                          keyTapCount={selectedMeasurement.keyTapCount}
+                          windowOffsetMs={0}
+                          peakAlignEnabled={true}
+                          title="アタック音 (KeyDown → KeyUp)"
+                        />
                       </>
                     )}
 
+                    {/* リリース音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.releaseWaveform && (
                       <>
-                        <AudioFeaturesDisplay 
-                          waveformData={selectedMeasurement.releaseWaveform} 
-                          title="リリース音の特徴量" 
-                        />
                         <SpectrumDisplay 
                           waveformData={selectedMeasurement.releaseWaveform} 
                           title="リリース音のスペクトル" 
                         />
+                        <AudioFeaturesDisplay 
+                          waveformData={selectedMeasurement.releaseWaveform} 
+                          title="リリース音の特徴量" 
+                        />
+                        <AveragedWaveform 
+                          waveformData={selectedMeasurement.releaseWaveform}
+                          keyTapCount={selectedMeasurement.keyUpCount}
+                          windowOffsetMs={0}
+                          peakAlignEnabled={true}
+                          title="リリース音 (KeyUp → KeyDown)"
+                        />
                       </>
+                    )}
+
+                    {/* 元録音データの波形 */}
+                    {selectedMeasurement.recordingData && (
+                      <AveragedWaveform 
+                        waveformData={selectedMeasurement.recordingData}
+                        keyTapCount={selectedMeasurement.keyTapCount}
+                        windowOffsetMs={0}
+                        peakAlignEnabled={false}
+                        title={`元録音データ (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
+                      />
                     )}
                   </div>
                 )}
               </div>
             ) : (
-              <p style={{ textAlign: 'center', color: '#666', padding: '40px' }}>
-                録音を完了すると解析結果が表示されます
-              </p>
+              <div className={styles.emptyAnalysis}>
+                <p>録音を完了するか、既存のデータを読み込んでください</p>
+                <button 
+                  className={styles.importBtnLarge}
+                  onClick={handleImportClick}
+                >
+                  📂 測定データを読み込む
+                </button>
+              </div>
             )}
           </div>
         )}
 
-        {/* 設定タブ */}
-        {activeTab === 'settings' && (
-          <div className={styles.tabPanel}>
-            <div className={styles.settingsGrid}>
-              {/* 録音設定 */}
-              <div className={styles.offsetControl}>
-                <h4 className={styles.controlTitle}>録音設定</h4>
-                <div className={styles.offsetRow}>
-                  <label htmlFor="durationInput">録音時間:</label>
+      </div>
+
+      {/* 測定データ設定モーダル */}
+      {settingsModalOpen && (
+        <div className={styles.modalOverlay} onClick={() => setSettingsModalOpen(false)}>
+          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h3>測定用音声設定</h3>
+              <button 
+                className={styles.modalCloseBtn}
+                onClick={() => setSettingsModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className={styles.modalBody}>
+              {/* 波形長設定 */}
+              <div className={styles.modalSettingsGroup}>
+                <h4>出力波形設定</h4>
+                <div className={styles.settingsRow}>
+                  <label htmlFor="editWaveformLengthInput">波形長:</label>
                   <input
-                    id="durationInput"
-                    type="number"
-                    min={MIN_RECORDING_DURATION}
-                    max={MAX_RECORDING_DURATION}
-                    step={500}
-                    value={recordingDuration}
-                    onChange={handleDurationChange}
-                    disabled={isRecording}
-                    className={styles.offsetInput}
-                  />
-                  <span className={styles.offsetHint}>ms ({(recordingDuration / 1000).toFixed(1)}秒)</span>
-                </div>
-                <div className={styles.offsetRow}>
-                  <label htmlFor="waveformLengthInput">波形長:</label>
-                  <input
-                    id="waveformLengthInput"
+                    id="editWaveformLengthInput"
                     type="number"
                     min={10}
                     max={500}
                     step={10}
-                    value={waveformLengthInput}
-                    onChange={handleWaveformLengthChange}
-                    disabled={isRecording}
-                    className={styles.offsetInput}
+                    value={editWaveformLengthInput}
+                    onChange={(e) => setEditWaveformLengthInput(parseInt(e.target.value, 10) || 100)}
+                    className={styles.settingsInput}
                   />
-                  <span className={styles.offsetHint}>ms</span>
-                  <button 
-                    onClick={handleWaveformLengthApply}
-                    disabled={isRecording || status !== 'completed'}
-                    className={styles.applyButton}
-                  >
-                    適用
-                  </button>
+                  <span className={styles.settingsHint}>ms</span>
+                </div>
+                <div className={styles.settingsRow}>
+                  <label htmlFor="editPeakIntervalInput">ピーク間隔:</label>
+                  <input
+                    id="editPeakIntervalInput"
+                    type="number"
+                    min="0"
+                    max="500"
+                    value={editPeakIntervalInput}
+                    onChange={(e) => setEditPeakIntervalInput(parseInt(e.target.value, 10) || 0)}
+                    className={styles.settingsInput}
+                  />
+                  <span className={styles.settingsHint}>ms</span>
                 </div>
               </div>
 
-              {/* 測定用音声設定 */}
-              {status === 'completed' && averagedWaveform && releaseWaveform && (
-                <div className={styles.offsetControl}>
-                  <h4 className={styles.controlTitle}>測定用音声設定</h4>
-                  <div className={styles.offsetRow}>
-                    <label htmlFor="peakIntervalInput">ピーク間隔:</label>
-                    <input
-                      id="peakIntervalInput"
-                      type="number"
-                      min="0"
-                      max="500"
-                      value={peakIntervalInput}
-                      onChange={handlePeakIntervalChange}
-                      className={styles.offsetInput}
-                    />
-                    <span className={styles.offsetHint}>ms</span>
-                    <button 
-                      onClick={handlePeakIntervalApply}
-                      className={styles.applyButton}
-                    >
-                      再計算
-                    </button>
-                  </div>
-                  <span className={styles.offsetHint}>
-                    アタック音のピークから {peakIntervalInput}ms 後にリリース音のピークが来るように配置
-                  </span>
-                </div>
-              )}
-
               {/* アタック音設定 */}
-              {status === 'completed' && keyTapCount > 0 && (
-                <div className={styles.offsetControl}>
-                  <h4 className={styles.controlTitle}>アタック音設定</h4>
-                  <div className={styles.offsetRow}>
-                    <label htmlFor="offsetInput">ウィンドウオフセット:</label>
-                    <input
-                      id="offsetInput"
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={offsetInput}
-                      onChange={handleOffsetChange}
-                      className={styles.offsetInput}
-                    />
-                    <span className={styles.offsetHint}>ms</span>
-                  </div>
-                  
-                  <div className={styles.offsetRow}>
-                    <label htmlFor="peakAlign" className={styles.checkboxLabel}>
-                      <input
-                        id="peakAlign"
-                        type="checkbox"
-                        checked={peakAlignInput}
-                        onChange={handlePeakAlignChange}
-                        className={styles.checkbox}
-                      />
-                      ピーク同期モード（アタック位置を揃える）
-                    </label>
-                  </div>
-
-                  <button 
-                    onClick={handleOffsetApply}
-                    className={styles.applyButton}
-                  >
-                    再計算
-                  </button>
-                  
-                  <span className={styles.offsetHint}>
-                    {peakAlignInput 
-                      ? 'ウィンドウ内のピーク（最大振幅）位置を基準に同期加算' 
-                      : `各キータップの -${offsetInput}ms からキーアップまで`}
-                  </span>
+              <div className={styles.modalSettingsGroup}>
+                <h4>アタック音設定</h4>
+                <div className={styles.settingsRow}>
+                  <label htmlFor="editAttackOffsetInput">ウィンドウオフセット:</label>
+                  <input
+                    id="editAttackOffsetInput"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={editAttackOffsetInput}
+                    onChange={(e) => setEditAttackOffsetInput(parseInt(e.target.value, 10) || 0)}
+                    className={styles.settingsInput}
+                  />
+                  <span className={styles.settingsHint}>ms</span>
                 </div>
-              )}
+                <div className={styles.settingsRow}>
+                  <label htmlFor="editAttackPeakAlign" className={styles.checkboxLabel}>
+                    <input
+                      id="editAttackPeakAlign"
+                      type="checkbox"
+                      checked={editAttackPeakAlignInput}
+                      onChange={(e) => setEditAttackPeakAlignInput(e.target.checked)}
+                      className={styles.checkbox}
+                    />
+                    ピーク同期モード
+                  </label>
+                </div>
+              </div>
 
               {/* リリース音設定 */}
-              {status === 'completed' && keyUpCount > 0 && (
-                <div className={styles.offsetControl}>
-                  <h4 className={styles.controlTitle}>リリース音設定</h4>
-                  <div className={styles.offsetRow}>
-                    <label htmlFor="releaseOffsetInput">ウィンドウオフセット:</label>
-                    <input
-                      id="releaseOffsetInput"
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={releaseOffsetInput}
-                      onChange={handleReleaseOffsetChange}
-                      className={styles.offsetInput}
-                    />
-                    <span className={styles.offsetHint}>ms</span>
-                  </div>
-                  
-                  <div className={styles.offsetRow}>
-                    <label htmlFor="releasePeakAlign" className={styles.checkboxLabel}>
-                      <input
-                        id="releasePeakAlign"
-                        type="checkbox"
-                        checked={releasePeakAlignInput}
-                        onChange={handleReleasePeakAlignChange}
-                        className={styles.checkbox}
-                      />
-                      ピーク同期モード（リリース位置を揃える）
-                    </label>
-                  </div>
-
-                  <button 
-                    onClick={handleReleaseOffsetApply}
-                    className={styles.applyButton}
-                  >
-                    再計算
-                  </button>
-                  
-                  <span className={styles.offsetHint}>
-                    {releasePeakAlignInput 
-                      ? 'ウィンドウ内のピーク（最大振幅）位置を基準に同期加算' 
-                      : `各キーアップの -${releaseOffsetInput}ms から次のキータップまで`}
-                  </span>
+              <div className={styles.modalSettingsGroup}>
+                <h4>リリース音設定</h4>
+                <div className={styles.settingsRow}>
+                  <label htmlFor="editReleaseOffsetInput">ウィンドウオフセット:</label>
+                  <input
+                    id="editReleaseOffsetInput"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={editReleaseOffsetInput}
+                    onChange={(e) => setEditReleaseOffsetInput(parseInt(e.target.value, 10) || 0)}
+                    className={styles.settingsInput}
+                  />
+                  <span className={styles.settingsHint}>ms</span>
                 </div>
-              )}
+                <div className={styles.settingsRow}>
+                  <label htmlFor="editReleasePeakAlign" className={styles.checkboxLabel}>
+                    <input
+                      id="editReleasePeakAlign"
+                      type="checkbox"
+                      checked={editReleasePeakAlignInput}
+                      onChange={(e) => setEditReleasePeakAlignInput(e.target.checked)}
+                      className={styles.checkbox}
+                    />
+                    ピーク同期モード
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div className={styles.modalFooter}>
+              <button 
+                className={styles.modalCancelBtn}
+                onClick={() => setSettingsModalOpen(false)}
+              >
+                キャンセル
+              </button>
+              <button 
+                className={styles.applyButton}
+                onClick={handleApplyMeasurementSettings}
+              >
+                適用
+              </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -14,11 +14,14 @@ export interface UseAudioRecorderReturn {
   status: RecordingStatus
   statusMessage: string
   recordingData: Float32Array | null
+  finalRecordingData: Float32Array | null // 録音完了時の最終データ
   recordingProgress: number // 0-1の録音進捗
   isRecording: boolean
   canRecord: boolean
   keyTapCount: number // 検出されたキータップ数
   keyUpCount: number // 検出されたキーアップ数
+  keyDownTimestamps: number[] // キーダウンのタイムスタンプ (ms)
+  keyUpTimestamps: number[] // キーアップのタイムスタンプ (ms)
   averagedWaveform: Float32Array | null // アタック音の同期加算平均波形
   releaseWaveform: Float32Array | null // リリース音の同期加算平均波形
   combinedWaveform: Float32Array | null // 合成された測定用音声
@@ -626,11 +629,14 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     status,
     statusMessage,
     recordingData,
+    finalRecordingData: finalRecordingDataRef.current,
     recordingProgress,
     isRecording,
     canRecord,
     keyTapCount,
     keyUpCount,
+    keyDownTimestamps: keyTimestampsRef.current,
+    keyUpTimestamps: keyUpTimestampsRef.current,
     averagedWaveform,
     releaseWaveform,
     combinedWaveform,

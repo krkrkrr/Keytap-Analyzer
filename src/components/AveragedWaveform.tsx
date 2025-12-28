@@ -223,7 +223,12 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     ctx.lineWidth = 1.5
     ctx.beginPath()
 
-    const maxAmplitude = Math.max(...Array.from(data).map(Math.abs))
+    // 最大振幅を計算（スプレッド演算子を使わずループで計算）
+    let maxAmplitude = 0
+    for (let i = 0; i < data.length; i++) {
+      const absValue = Math.abs(data[i])
+      if (absValue > maxAmplitude) maxAmplitude = absValue
+    }
     const minDb = -60
 
     for (let i = 0; i < data.length; i++) {
@@ -300,7 +305,11 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     const channelData = audioBuffer.getChannelData(0)
     
     // 波形データをコピー（音量を調整）
-    const maxAmplitude = Math.max(...Array.from(waveformData).map(Math.abs))
+    let maxAmplitude = 0
+    for (let i = 0; i < waveformData.length; i++) {
+      const absValue = Math.abs(waveformData[i])
+      if (absValue > maxAmplitude) maxAmplitude = absValue
+    }
     const gain = maxAmplitude > 0 ? 0.8 / maxAmplitude : 1
     for (let i = 0; i < waveformData.length; i++) {
       channelData[i] = waveformData[i] * gain
