@@ -19,6 +19,48 @@
   margin-bottom: 30px;
 }
 
+.recordingSettings {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.recordingSettings label {
+  font-weight: bold;
+  color: #333;
+}
+
+.durationInput {
+  width: 100px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.durationInput:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.durationInput:disabled {
+  background-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.durationUnit {
+  font-size: 14px;
+  color: #666;
+}
+
 .controlGroup {
   margin-bottom: 20px;
   display: flex;
@@ -51,6 +93,14 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.controlTitle {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 16px;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 8px;
 }
 
 .offsetRow {
@@ -117,4 +167,452 @@
 .offsetHint {
   font-size: 12px;
   color: #666;
+}
+
+/* タブメニュー */
+.tabContainer {
+  margin-top: 20px;
+}
+
+.tabList {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e9ecef;
+  margin-bottom: 20px;
+}
+
+.tab {
+  padding: 12px 24px;
+  background-color: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  color: #4CAF50;
+  background-color: #f8f9fa;
+}
+
+.tabActive {
+  color: #4CAF50;
+  border-bottom-color: #4CAF50;
+}
+
+.tabPanel {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 新規タブのパネル */
+.newMeasurementPanel {
+  text-align: center;
+  padding: 20px;
+}
+
+.newMeasurementPanel h3 {
+  color: #4CAF50;
+  margin: 0 0 8px 0;
+}
+
+.newMeasurementPanel p {
+  color: #888;
+  margin: 0 0 20px 0;
+}
+
+/* 設定セクション（新規タブ内） */
+.settingsSection {
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #f5f5f5;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.settingsGroup {
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.settingsGroup:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.settingsRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.settingsRow label {
+  font-weight: bold;
+  color: #333;
+  min-width: 110px;
+}
+
+.settingsInput {
+  width: 80px;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.settingsInput:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.settingsInput:disabled {
+  background-color: #e9ecef;
+  color: #6c757d;
+  cursor: not-allowed;
+}
+
+.settingsHint {
+  font-size: 12px;
+  color: #666;
+  display: block;
+  margin-top: 4px;
+}
+
+/* 解析タブのレイアウト */
+.analysisContent {
+  display: flex;
+  gap: 20px;
+}
+
+.measurementList {
+  min-width: 250px;
+  max-width: 300px;
+  background: #1a1a1a;
+  border-radius: 8px;
+  padding: 12px;
+  flex-shrink: 0;
+}
+
+.measurementList h4 {
+  margin: 0;
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.measurementListHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #333;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+}
+
+.importBtn {
+  background: #333;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.importBtn:hover {
+  background: #4CAF50;
+  color: #fff;
+}
+
+.emptyAnalysis {
+  text-align: center;
+  padding: 40px;
+}
+
+.emptyAnalysis p {
+  color: #666;
+  margin-bottom: 20px;
+}
+
+.importBtnLarge {
+  background: #333;
+  border: 1px solid #4CAF50;
+  color: #4CAF50;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 12px 24px;
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+
+.importBtnLarge:hover {
+  background: #4CAF50;
+  color: #fff;
+}
+
+.measurementItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: #252525;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.measurementItem:hover {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+.measurementItemSelected {
+  border-color: #4CAF50 !important;
+  background: #1a2a1a;
+}
+
+.measurementNameInput {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+  width: calc(100% - 24px);
+}
+
+.measurementNameInput:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.measurementNameInput:focus {
+  background: rgba(255,255,255,0.1);
+  outline: none;
+}
+
+.measurementInfo {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.measurementActions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.measurementItem:hover .measurementActions {
+  opacity: 1;
+}
+
+.measurementExportBtn {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.measurementExportBtn:hover {
+  background: #4CAF50;
+  color: #fff;
+}
+
+.measurementSettingsBtn {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.measurementSettingsBtn:hover {
+  background: #2196F3;
+  color: #fff;
+}
+
+.measurementSettingsBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.measurementSettingsBtn:disabled:hover {
+  background: transparent;
+  color: #888;
+}
+
+.measurementDeleteBtn {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.measurementDeleteBtn:hover {
+  background: #ff4444;
+  color: #fff;
+}
+
+.measurementAnalysis {
+  flex: 1;
+  min-width: 0;
+}
+
+.measurementAnalysis h3 {
+  margin: 0 0 16px 0;
+  color: #4CAF50;
+  font-size: 1.1rem;
+}
+
+.settingsSection {
+  margin-bottom: 20px;
+}
+
+.settingsGrid {
+  display: grid;
+  gap: 16px;
+}
+
+/* モーダル */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modalContent {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  min-width: 360px;
+  max-width: 90%;
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.modalHeader h3 {
+  margin: 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.modalCloseBtn {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.modalCloseBtn:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+
+.modalBody {
+  padding: 20px;
+}
+
+.modalSettingsGroup {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.modalSettingsGroup:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.modalSettingsGroup h4 {
+  margin: 0 0 12px 0;
+  color: #333;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid #e9ecef;
+}
+
+.modalCancelBtn {
+  padding: 8px 16px;
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.modalCancelBtn:hover {
+  background: #e9ecef;
+  color: #333;
 }

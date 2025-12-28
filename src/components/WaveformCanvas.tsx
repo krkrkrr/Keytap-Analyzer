@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import styles from './WaveformCanvas.module.css'
 
 interface WaveformCanvasProps {
@@ -9,6 +9,9 @@ interface WaveformCanvasProps {
 
 export function WaveformCanvas({ recordingData, isRecording = false, progress = 1 }: WaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
 
   const drawEmptyCanvas = useCallback((canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
     ctx.fillStyle = '#fafafa'
@@ -72,6 +75,106 @@ export function WaveformCanvas({ recordingData, isRecording = false, progress = 
     ctx.stroke()
   }, [])
 
+  // 波形を再生する関数
+  const playWaveform = useCallback(async () => {
+    if (!recordingData || recordingData.length === 0) {
+      console.log('再生データがありません')
+      return
+    }
+
+    console.log('再生開始:', recordingData.length, 'サンプル')
+
+    // 既に再生中なら停止
+    if (sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current.stop()
+      } catch (e) {
+        // already stopped
+      }
+      sourceNodeRef.current = null
+    }
+
+    try {
+      // AudioContextを作成（または再利用）
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
+      }
+
+      const audioContext = audioContextRef.current
+
+      // AudioContextがsuspendedなら再開
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume()
+      }
+
+      // 実際のサンプルレートを使用
+      const sampleRate = audioContext.sampleRate
+      console.log('サンプルレート:', sampleRate)
+
+      // AudioBufferを作成
+      const audioBuffer = audioContext.createBuffer(1, recordingData.length, sampleRate)
+      const channelData = audioBuffer.getChannelData(0)
+      
+      // 波形データをコピー（音量を調整）
+      // 大きな配列でスタックオーバーフローを避けるためループで最大値を計算
+      let maxAmplitude = 0
+      for (let i = 0; i < recordingData.length; i++) {
+        const absVal = Math.abs(recordingData[i])
+        if (absVal > maxAmplitude) maxAmplitude = absVal
+      }
+      const gain = maxAmplitude > 0 ? 0.8 / maxAmplitude : 1
+      console.log('最大振幅:', maxAmplitude, 'ゲイン:', gain)
+      
+      for (let i = 0; i < recordingData.length; i++) {
+        channelData[i] = recordingData[i] * gain
+      }
+
+      // AudioBufferSourceNodeを作成して再生
+      const sourceNode = audioContext.createBufferSource()
+      sourceNode.buffer = audioBuffer
+      sourceNode.connect(audioContext.destination)
+      
+      sourceNode.onended = () => {
+        console.log('再生終了')
+        setIsPlaying(false)
+        sourceNodeRef.current = null
+      }
+
+      sourceNodeRef.current = sourceNode
+      setIsPlaying(true)
+      sourceNode.start(0)
+      console.log('再生中...')
+    } catch (error) {
+      console.error('再生エラー:', error)
+      setIsPlaying(false)
+    }
+  }, [recordingData])
+
+  // 再生停止
+  const stopWaveform = useCallback(() => {
+    if (sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current.stop()
+      } catch (e) {
+        // already stopped
+      }
+      sourceNodeRef.current = null
+      setIsPlaying(false)
+    }
+  }, [])
+
+  // コンポーネントのクリーンアップ
+  useEffect(() => {
+    return () => {
+      if (sourceNodeRef.current) {
+        sourceNodeRef.current.stop()
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+      }
+    }
+  }, [])
+
   const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -108,6 +211,19 @@ export function WaveformCanvas({ recordingData, isRecording = false, progress = 
 
   return (
     <div className={styles.canvasContainer}>
+      <div className={styles.canvasHeader}>
+        <h3 style={{ margin: 0, color: '#2196F3' }}>🎙️ 録音データ</h3>
+        {recordingData && recordingData.length > 0 && !isRecording && (
+          <button 
+            onClick={isPlaying ? stopWaveform : playWaveform}
+            className={styles.playButton}
+            style={{ backgroundColor: '#2196F3' }}
+            title={isPlaying ? '停止' : '再生'}
+          >
+            {isPlaying ? '⏹️ 停止' : '▶️ 再生'}
+          </button>
+        )}
+      </div>
       <canvas ref={canvasRef} className={styles.waveformCanvas} />
     </div>
   )

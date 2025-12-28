@@ -9,8 +9,14 @@ Tool for Measuring Keyboard Typing Sound
     - Shteinberg UR22C
 
 ### Software
-- Chrome
-- Windows 11
+- **Browser** (with Web Audio API & getUserMedia support):
+  | Browser | Minimum Version |
+  |---------|-----------------|
+  | Chrome | 53+ |
+  | Firefox | 36+ |
+  | Safari | 14.1+ |
+  | Edge | 79+ |
+  | Opera | 40+ |
 
 ## Usage
 
