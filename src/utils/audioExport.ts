@@ -234,6 +234,7 @@ export interface MeasurementMetadata {
   audio: {
     sampleRate: number
     waveformLengthMs: number
+    peakPositionMs?: number
     recordingDurationMs: number
   }
   files: {

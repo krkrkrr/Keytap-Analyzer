@@ -5,8 +5,9 @@ export type RecordingStatus = 'idle' | 'recording' | 'completed' | 'error'
 // 同期加算の設定
 const DEFAULT_WINDOW_OFFSET_MS = 5   // デフォルトのキータップ前オフセット (ms)
 const DEFAULT_RELEASE_OFFSET_MS = 5  // デフォルトのリリース音前オフセット (ms)
-const DEFAULT_PEAK_INTERVAL_MS = 20  // アタック音ピークからリリース音ピークまでのデフォルト間隔 (ms)
-const DEFAULT_WAVEFORM_LENGTH_MS = 100 // デフォルトの波形長 (ms)
+const DEFAULT_PEAK_INTERVAL_MS = 12  // アタック音ピークからリリース音ピークまでのデフォルト間隔 (ms)
+const DEFAULT_WAVEFORM_LENGTH_MS = 70 // デフォルトの波形長 (ms)
+const DEFAULT_PEAK_POSITION_MS = 10  // デフォルトのピーク位置オフセット (ms)
 const SAMPLE_RATE = 48000    // サンプルレート (Hz)
 const PEAK_SEARCH_WINDOW_MS = 50  // ピーク検出用の検索範囲 (ms)
 
@@ -30,12 +31,14 @@ export interface UseAudioRecorderReturn {
   peakIntervalMs: number // アタック音ピークからリリース音ピークまでの間隔 (ms)
   peakAlignEnabled: boolean // ピーク同期モード
   waveformLengthMs: number // 波形長 (ms)
+  peakPositionMs: number // ピーク位置オフセット (ms)
   startRecording: () => Promise<void>
   initializeAudio: () => Promise<void>
   recalculateAveragedWaveform: (offsetMs: number, peakAlign: boolean) => void
   recalculateReleaseWaveform: (offsetMs: number, peakAlign: boolean) => void
   recalculateCombinedWaveform: (intervalMs: number) => void
   setWaveformLengthMs: (lengthMs: number) => void
+  setPeakPositionMs: (positionMs: number) => void
 }
 
 export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderReturn {
@@ -55,6 +58,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   const [peakIntervalMs, setPeakIntervalMs] = useState(DEFAULT_PEAK_INTERVAL_MS)
   const [peakAlignEnabled, setPeakAlignEnabled] = useState(false)
   const [waveformLengthMs, setWaveformLengthMs] = useState(DEFAULT_WAVEFORM_LENGTH_MS)
+  const [peakPositionMs, setPeakPositionMs] = useState(DEFAULT_PEAK_POSITION_MS)
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -213,10 +217,10 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     finalRecordingDataRef.current = combinedData
 
     // アタック音の同期加算処理を実行（デフォルトはピーク同期OFF）
-    calculateAveragedWaveform(combinedData, keyTimestampsRef.current, keyUpTimestampsRef.current, windowOffsetMs, false, waveformLengthMs)
+    calculateAveragedWaveform(combinedData, keyTimestampsRef.current, keyUpTimestampsRef.current, windowOffsetMs, false, waveformLengthMs, peakPositionMs)
     // リリース音の同期加算処理を実行
-    calculateReleaseWaveform(combinedData, keyUpTimestampsRef.current, keyTimestampsRef.current, releaseOffsetMs, false, waveformLengthMs)
-  }, [windowOffsetMs, releaseOffsetMs, waveformLengthMs])
+    calculateReleaseWaveform(combinedData, keyUpTimestampsRef.current, keyTimestampsRef.current, releaseOffsetMs, false, waveformLengthMs, peakPositionMs)
+  }, [windowOffsetMs, releaseOffsetMs, waveformLengthMs, peakPositionMs])
 
   // ウィンドウ内のピーク位置を検出する関数
   const findPeakIndex = useCallback((windowData: Float32Array, searchRangeSamples: number): number => {
@@ -243,7 +247,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     _keyUpTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    targetLengthMs: number
+    targetLengthMs: number,
+    peakPosMs: number  // ピーク位置オフセット (ms)
   ) => {
     // 最初と最後のウィンドウを除外するため、3つ以上のキータップが必要
     if (keyDownTimestamps.length < 3) {
@@ -292,11 +297,11 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
         return
       }
 
-      // ピーク位置を10%の位置に配置し、残りを90%に
-      const peakPositionInOutput = Math.floor(targetLengthSamples * 0.1)
+      // ピーク位置を peakPosMs の位置に配置
+      const peakPositionInOutput = Math.floor((peakPosMs / 1000) * sampleRate)
       const outputWindowSize = targetLengthSamples
 
-      console.log(`ピーク同期: 出力長 ${outputWindowSize} サンプル (${targetLengthMs}ms), ピーク位置 ${peakPositionInOutput}`)
+      console.log(`ピーク同期: 出力長 ${outputWindowSize} サンプル (${targetLengthMs}ms), ピーク位置 ${peakPositionInOutput} サンプル (${peakPosMs}ms)`)
 
       // ピーク位置を揃えて同期加算
       const summedWaveform = new Float32Array(outputWindowSize)
@@ -367,7 +372,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     _keyDownTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    targetLengthMs: number
+    targetLengthMs: number,
+    peakPosMs: number  // ピーク位置オフセット (ms)
   ) => {
     // keyupが2つ以上必要
     if (keyUpTimestamps.length < 2) {
@@ -413,8 +419,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
         return
       }
 
-      // ピーク位置を10%の位置に配置
-      const peakPositionInOutput = Math.floor(targetLengthSamples * 0.1)
+      // ピーク位置を peakPosMs の位置に配置
+      const peakPositionInOutput = Math.floor((peakPosMs / 1000) * sampleRate)
       const outputWindowSize = targetLengthSamples
 
       // ピーク位置を揃えて同期加算
@@ -547,8 +553,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return
     }
     
-    calculateAveragedWaveform(audioData, keyDownTimestamps, keyUpTimestamps, offsetMs, peakAlign, waveformLengthMs)
-  }, [calculateAveragedWaveform, waveformLengthMs])
+    calculateAveragedWaveform(audioData, keyDownTimestamps, keyUpTimestamps, offsetMs, peakAlign, waveformLengthMs, peakPositionMs)
+  }, [calculateAveragedWaveform, waveformLengthMs, peakPositionMs])
 
   // リリース音のオフセットを変更した時に再計算する関数
   const recalculateReleaseWaveform = useCallback((offsetMs: number, peakAlign: boolean) => {
@@ -560,8 +566,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return
     }
     
-    calculateReleaseWaveform(audioData, keyUpTimestamps, keyDownTimestamps, offsetMs, peakAlign, waveformLengthMs)
-  }, [calculateReleaseWaveform, waveformLengthMs])
+    calculateReleaseWaveform(audioData, keyUpTimestamps, keyDownTimestamps, offsetMs, peakAlign, waveformLengthMs, peakPositionMs)
+  }, [calculateReleaseWaveform, waveformLengthMs, peakPositionMs])
 
   // 合成波形を再計算する関数
   const recalculateCombinedWaveform = useCallback((intervalMs: number) => {
@@ -645,11 +651,13 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     peakIntervalMs,
     peakAlignEnabled,
     waveformLengthMs,
+    peakPositionMs,
     startRecording,
     initializeAudio,
     recalculateAveragedWaveform,
     recalculateReleaseWaveform,
     recalculateCombinedWaveform,
     setWaveformLengthMs,
+    setPeakPositionMs,
   }
 }

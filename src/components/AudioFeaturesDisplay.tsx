@@ -152,6 +152,8 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
             <tr>
               <th>特徴量</th>
               <th>値</th>
+              <th>単位</th>
+              <th>範囲</th>
               <th>説明</th>
             </tr>
           </thead>
@@ -168,6 +170,8 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
                   <td className={styles.featureValue}>
                     {formatFeatureValue(value)}
                   </td>
+                  <td className={styles.featureUnit}>{desc.unit || '-'}</td>
+                  <td className={styles.featureRange}>{desc.range}</td>
                   <td className={styles.featureDesc}>{desc.description}</td>
                 </tr>
               )

@@ -76,10 +76,23 @@
   white-space: nowrap;
 }
 
+.featureUnit {
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.featureRange {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+}
+
 .featureDesc {
   font-size: 12px;
   color: #666;
-  max-width: 300px;
+  max-width: 250px;
 }
 
 /* Loudness styles */
