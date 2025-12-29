@@ -36,6 +36,7 @@ export interface UseAudioRecorderReturn {
   peakAlignEnabled: boolean // ピーク同期モード
   waveformLengthMs: number // 波形長 (ms)
   peakPositionMs: number // ピーク位置オフセット (ms)
+  sampleRate: number // サンプルレート (Hz)
   startRecording: () => Promise<void>
   initializeAudio: () => Promise<void>
   recalculateAveragedWaveform: (offsetMs: number, peakAlign: boolean) => void
@@ -151,22 +152,9 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
 
     const recordingChunks: Float32Array[] = []
 
-    // チャンクを結合してFloat32Arrayを作成するヘルパー関数
-    const combineChunks = (chunks: Float32Array[]): Float32Array => {
-      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
-      const combined = new Float32Array(totalLength)
-      let offset = 0
-      for (const chunk of chunks) {
-        combined.set(chunk, offset)
-        offset += chunk.length
-      }
-      return combined
-    }
-
     // 録音されたサンプル数をトラッキング
     let totalSamplesRecorded = 0
     let isFirstChunk = true
-    let updateCounter = 0
 
     // 音声データを収集
     scriptProcessor.onaudioprocess = (audioProcessingEvent) => {

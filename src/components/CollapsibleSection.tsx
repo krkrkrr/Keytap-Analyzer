@@ -1,4 +1,4 @@
-import { useState, ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import styles from './CollapsibleSection.module.css'
 
 interface CollapsibleSectionProps {
