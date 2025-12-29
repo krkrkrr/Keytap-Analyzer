@@ -258,7 +258,10 @@ export function KeytapVisualizer() {
       ? keyUpTimestamps.slice(1, -1) 
       : keyUpTimestamps.slice(0, 1)
 
-    const endTimestamps = calculateWindowEndTimestamps(trimmedUpTimestamps, keyDownTimestamps)
+    // リリース音の場合：keyUp → 次のkeyDown または 次のkeyUp の早い方まで
+    // trimmedUpTimestamps に対応するendTimestamps を計算
+    // keyDownTimestamps と keyUpTimestamps の両方を考慮する
+    const endTimestamps = calculateWindowEndTimestamps(trimmedUpTimestamps, [...keyDownTimestamps, ...keyUpTimestamps].sort((a, b) => a - b))
 
     const result = calculateSyncAveragedWaveform({
       audioData,

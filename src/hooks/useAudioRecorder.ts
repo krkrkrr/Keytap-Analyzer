@@ -78,6 +78,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   const pendingKeyUpTimestampsRef = useRef<number[]>([]) // 最初のチャンク前のキーアップイベント（AudioContext.currentTime）
   const keyTimestampsRef = useRef<number[]>([])
   const keyUpTimestampsRef = useRef<number[]>([])
+  // 累積サンプル数とplaybackTimeのマッピングを保持（同期補正用）
+  const sampleTimeMapRef = useRef<{ samples: number; playbackTime: number }[]>([])
   const finalRecordingDataRef = useRef<Float32Array | null>(null)
 
   const initializeAudio = useCallback(async () => {
@@ -156,26 +158,31 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
 
     const recordingChunks: Float32Array[] = []
 
-    // 録音されたサンプル数をトラッキング
+    // 録音されたサンプル数をトラッキング（累積で正確なタイムスタンプを計算）
     let totalSamplesRecorded = 0
 
     // 最初のチャンク前フラグをリセット
     firstChunkReceivedRef.current = false
     pendingKeyDownTimestampsRef.current = []
     pendingKeyUpTimestampsRef.current = []
+    sampleTimeMapRef.current = []
 
     // 音声データを収集
     scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
       const inputBuffer = audioProcessingEvent.inputBuffer
       const inputData = inputBuffer.getChannelData(0)
       
+      // playbackTime: このバッファの再生が開始される予定の時刻（秒）
+      // これはオーディオデータの正確なタイムラインを示す
+      const playbackTime = audioProcessingEvent.playbackTime
+      
       // 最初のチャンクが来た時点で、録音開始時刻を調整
-      // この時点でbufferSize分のデータが既に含まれているため、
-      // 録音開始時刻 = 現在のAudioContext.currentTime - bufferSize/sampleRate
+      // playbackTimeはこのチャンクの「終了」時刻なので、バッファ分を引く
       if (!firstChunkReceivedRef.current) {
         const bufferDurationSec = bufferSize / realSampleRate
-        audioContextStartTimeRef.current = audioContext.currentTime - bufferDurationSec
-        console.log(`最初のオーディオチャンク受信: AudioContext.currentTime=${audioContext.currentTime.toFixed(3)}s, バッファ補正=${bufferDurationSec.toFixed(3)}s, 録音開始時刻=${audioContextStartTimeRef.current.toFixed(3)}s`)
+        // playbackTimeはこのバッファが再生される時刻（チャンク開始時刻）
+        audioContextStartTimeRef.current = playbackTime
+        console.log(`最初のオーディオチャンク受信: playbackTime=${playbackTime.toFixed(3)}s, AudioContext.currentTime=${audioContext.currentTime.toFixed(3)}s, バッファ時間=${bufferDurationSec.toFixed(3)}s`)
         
         // 最初のチャンク前に発生したキーイベントを正しいタイムスタンプで再計算
         for (const audioTime of pendingKeyDownTimestampsRef.current) {
@@ -196,9 +203,28 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
         firstChunkReceivedRef.current = true
       }
       
+      // サンプル数とplaybackTimeのマッピングを保存（補正計算用）
+      // このチャンクの終了時点でのマッピングを記録
+      sampleTimeMapRef.current.push({
+        samples: totalSamplesRecorded + inputData.length,
+        playbackTime: playbackTime + (bufferSize / realSampleRate)  // チャンク終了時刻
+      })
+      // メモリ節約のため、古いエントリを削除（直近30秒分だけ保持）
+      const maxEntries = Math.ceil(30 * realSampleRate / bufferSize)
+      if (sampleTimeMapRef.current.length > maxEntries) {
+        sampleTimeMapRef.current.shift()
+      }
+      
       // データをコピー
       recordingChunks.push(new Float32Array(inputData))
       totalSamplesRecorded += inputData.length
+      
+      // デバッグ: 蓄積サンプル数と時刻の整合性をチェック（1秒ごと）
+      const expectedTimeMs = (totalSamplesRecorded / realSampleRate) * 1000
+      const actualTimeMs = (playbackTime + (bufferSize / realSampleRate) - audioContextStartTimeRef.current) * 1000
+      if (Math.floor(totalSamplesRecorded / realSampleRate) > Math.floor((totalSamplesRecorded - inputData.length) / realSampleRate)) {
+        console.log(`[同期チェック] ${Math.floor(totalSamplesRecorded / realSampleRate)}秒経過: サンプル数ベース=${expectedTimeMs.toFixed(1)}ms, playbackTimeベース=${actualTimeMs.toFixed(1)}ms, 差=${(actualTimeMs - expectedTimeMs).toFixed(1)}ms`)
+      }
 
       // リアルタイム波形表示は無効化（処理負荷軽減のため）
       // updateCounter++
@@ -339,16 +365,14 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     const trimmedUpTimestamps = keyUpTimestamps.length >= 3 
       ? keyUpTimestamps.slice(1, -1) 
       : keyUpTimestamps.slice(0, 1)
-    const trimmedDownTimestamps = keyDownTimestamps.length >= 3 
-      ? keyDownTimestamps.slice(1, -1) 
-      : keyDownTimestamps.slice(0, 1)
     console.log(`[リリース音] 元のキーアップ数: ${keyUpTimestamps.length}, 使用するキーアップ数: ${trimmedUpTimestamps.length}`)
 
     const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
     console.log(`[リリース音] オフセット: ${offsetMs}ms, ピーク同期: ${peakAlign}`)
 
-    // 動的ウィンドウ終端を計算（リリース音の場合は keyUp → keyDown）
-    const endTimestamps = calculateWindowEndTimestamps(trimmedUpTimestamps, trimmedDownTimestamps)
+    // 動的ウィンドウ終端を計算（リリース音の場合は keyUp → 次のkeyDown または keyUp の早い方）
+    const allTimestamps = [...keyDownTimestamps, ...keyUpTimestamps].sort((a, b) => a - b)
+    const endTimestamps = calculateWindowEndTimestamps(trimmedUpTimestamps, allTimestamps)
 
     const result = calculateSyncAveragedWaveform({
       audioData,
@@ -444,6 +468,46 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     }
   }, [averagedWaveform, releaseWaveform, peakIntervalMs, calculateCombinedWaveformLocal])
 
+  // AudioContext.currentTimeからサンプル数ベースのタイムスタンプ（ms）を計算する
+  // sampleTimeMapを使用して、playbackTimeとサンプル数の対応関係から補正を行う
+  const audioTimeToSampleBasedMs = useCallback((audioTime: number): number => {
+    const map = sampleTimeMapRef.current
+    const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
+    
+    // マップが空の場合は単純計算
+    if (map.length === 0) {
+      return (audioTime - audioContextStartTimeRef.current) * 1000
+    }
+    
+    // audioTimeに最も近いエントリを探す（線形補間）
+    let prevEntry = map[0]
+    let nextEntry = map[map.length - 1]
+    
+    for (let i = 0; i < map.length; i++) {
+      if (map[i].playbackTime <= audioTime) {
+        prevEntry = map[i]
+      }
+      if (map[i].playbackTime >= audioTime && (nextEntry.playbackTime > audioTime || i === map.length - 1)) {
+        nextEntry = map[i]
+        break
+      }
+    }
+    
+    // prevEntryとnextEntryの間で線形補間
+    if (prevEntry === nextEntry || prevEntry.playbackTime === nextEntry.playbackTime) {
+      // サンプル数ベースで計算
+      const deltaTime = audioTime - prevEntry.playbackTime
+      const deltaSamples = deltaTime * sampleRate
+      const totalSamples = prevEntry.samples + deltaSamples
+      return (totalSamples / sampleRate) * 1000
+    }
+    
+    // 線形補間で正確なサンプル位置を推定
+    const timeFraction = (audioTime - prevEntry.playbackTime) / (nextEntry.playbackTime - prevEntry.playbackTime)
+    const interpolatedSamples = prevEntry.samples + (nextEntry.samples - prevEntry.samples) * timeFraction
+    return (interpolatedSamples / sampleRate) * 1000
+  }, [])
+
   // keydownイベントリスナー
   useEffect(() => {
     const handleKeyDown = (_event: KeyboardEvent) => {
@@ -460,21 +524,23 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
         return
       }
       
-      // 通常処理：オーディオタイムラインと同期したタイムスタンプを計算
-      const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
-      const elapsedMs = elapsedSeconds * 1000
+      // サンプル数ベースで正確なタイムスタンプを計算
+      const elapsedMs = audioTimeToSampleBasedMs(currentAudioTime)
+      
+      // 旧方式（比較用）
+      const oldElapsedMs = (currentAudioTime - audioContextStartTimeRef.current) * 1000
       
       keyTimestampsRef.current.push(elapsedMs)
       setKeyTapCount(keyTimestampsRef.current.length)
       
-      console.log(`KeyDown detected at ${elapsedMs.toFixed(1)}ms (AudioContext.currentTime=${currentAudioTime.toFixed(3)}s)`)
+      console.log(`KeyDown detected at ${elapsedMs.toFixed(1)}ms (旧方式: ${oldElapsedMs.toFixed(1)}ms, 差: ${(elapsedMs - oldElapsedMs).toFixed(1)}ms)`)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isRecording])
+  }, [isRecording, audioTimeToSampleBasedMs])
 
   // keyupイベントリスナー
   useEffect(() => {
@@ -492,14 +558,16 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
         return
       }
       
-      // 通常処理：オーディオタイムラインと同期したタイムスタンプを計算
-      const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
-      const elapsedMs = elapsedSeconds * 1000
+      // サンプル数ベースで正確なタイムスタンプを計算
+      const elapsedMs = audioTimeToSampleBasedMs(currentAudioTime)
+      
+      // 旧方式（比較用）
+      const oldElapsedMs = (currentAudioTime - audioContextStartTimeRef.current) * 1000
       
       keyUpTimestampsRef.current.push(elapsedMs)
       setKeyUpCount(keyUpTimestampsRef.current.length)
       
-      console.log(`KeyUp detected at ${elapsedMs.toFixed(1)}ms (AudioContext.currentTime=${currentAudioTime.toFixed(3)}s)`)
+      console.log(`KeyUp detected at ${elapsedMs.toFixed(1)}ms (旧方式: ${oldElapsedMs.toFixed(1)}ms, 差: ${(elapsedMs - oldElapsedMs).toFixed(1)}ms)`)
     }
 
     window.addEventListener('keyup', handleKeyUp)
