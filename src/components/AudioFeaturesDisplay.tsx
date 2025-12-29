@@ -23,6 +23,7 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
 
   // 波形データの統計情報を計算
   const waveformStats = useMemo(() => {
+    if (!waveformData) return null
     const stats = calculateWaveformStats(waveformData)
     if (!stats) return null
 
