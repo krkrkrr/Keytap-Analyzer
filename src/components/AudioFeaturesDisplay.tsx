@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useAudioFeatures, FEATURE_DESCRIPTIONS, formatFeatureValue, type FeatureName } from '../hooks/useAudioFeatures'
+import { calculateWaveformStats } from '../utils/arrayStats'
 import styles from './AudioFeatures.module.css'
 
 interface AudioFeaturesDisplayProps {
@@ -22,42 +23,20 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
 
   // 波形データの統計情報を計算
   const waveformStats = useMemo(() => {
-    if (!waveformData || waveformData.length === 0) return null
+    const stats = calculateWaveformStats(waveformData)
+    if (!stats) return null
 
-    const values = Array.from(waveformData)
-    const absValues = values.map(Math.abs)
-    
-    const min = Math.min(...values)
-    const max = Math.max(...values)
-    const absMax = Math.max(...absValues)
-    const mean = values.reduce((a, b) => a + b, 0) / values.length
-    const rms = Math.sqrt(values.reduce((a, b) => a + b * b, 0) / values.length)
-    
-    // ピーク位置を見つける
-    let peakIndex = 0
-    for (let i = 0; i < absValues.length; i++) {
-      if (absValues[i] === absMax) {
-        peakIndex = i
-        break
-      }
-    }
-    const peakTimeMs = (peakIndex / SAMPLE_RATE) * 1000
-    const durationMs = (waveformData.length / SAMPLE_RATE) * 1000
+    const peakTimeMs = (stats.peakIndex / SAMPLE_RATE) * 1000
+    const durationMs = (stats.length / SAMPLE_RATE) * 1000
 
     return {
-      length: waveformData.length,
+      ...stats,
       durationMs,
-      min,
-      max,
-      absMax,
-      mean,
-      rms,
-      peakIndex,
       peakTimeMs,
-      minDb: linearToDb(min),
-      maxDb: linearToDb(max),
-      absMaxDb: linearToDb(absMax),
-      rmsDb: linearToDb(rms),
+      minDb: linearToDb(stats.min),
+      maxDb: linearToDb(stats.max),
+      absMaxDb: linearToDb(stats.absMax),
+      rmsDb: linearToDb(stats.rms),
     }
   }, [waveformData])
 

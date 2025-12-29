@@ -229,6 +229,20 @@
   margin: 0 0 20px 0;
 }
 
+/* 録音セクション（新規タブ内） */
+.recordingSection {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.recordingSection .controlGroup {
+  margin-bottom: 0;
+  justify-content: center;
+}
+
 /* 設定セクション（新規タブ内） */
 .settingsSection {
   margin-top: 20px;

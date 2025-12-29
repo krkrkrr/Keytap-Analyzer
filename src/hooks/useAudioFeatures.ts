@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import Meyda from 'meyda'
+import { arrayAbsMax } from '../utils/arrayStats'
 
 // Meydaで抽出する特徴量のリスト
 const FEATURE_LIST = [
@@ -193,8 +194,8 @@ export function useAudioFeatures(waveformData: Float32Array | null, sampleRate =
       }
 
       // デバッグ: 入力データの情報を出力
-      const inputMax = Math.max(...Array.from(waveformData).map(Math.abs))
-      const adjustedMax = Math.max(...Array.from(adjustedData).map(Math.abs))
+      const inputMax = arrayAbsMax(waveformData)
+      const adjustedMax = arrayAbsMax(adjustedData)
       console.log('[Meyda] 入力データ:', {
         originalLength: waveformData.length,
         bufferSize,
