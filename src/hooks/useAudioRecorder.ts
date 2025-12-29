@@ -172,17 +172,20 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       const inputBuffer = audioProcessingEvent.inputBuffer
       const inputData = inputBuffer.getChannelData(0)
       
-      // playbackTime: このバッファの再生が開始される予定の時刻（秒）
-      // これはオーディオデータの正確なタイムラインを示す
+      // playbackTime: このバッファの「出力」が再生される予定の時刻（秒）
+      // 注意: これは入力データの録音時刻ではなく、出力の再生時刻
+      // 入力データの録音時刻 = playbackTime - bufferDuration（入出力間の遅延）
       const playbackTime = audioProcessingEvent.playbackTime
+      const bufferDurationSec = bufferSize / realSampleRate
       
       // 最初のチャンクが来た時点で、録音開始時刻を調整
-      // playbackTimeはこのチャンクの「終了」時刻なので、バッファ分を引く
+      // 入力データの録音時刻を推定: playbackTime - bufferDuration
       if (!firstChunkReceivedRef.current) {
-        const bufferDurationSec = bufferSize / realSampleRate
-        // playbackTimeはこのバッファが再生される時刻（チャンク開始時刻）
-        audioContextStartTimeRef.current = playbackTime
-        console.log(`最初のオーディオチャンク受信: playbackTime=${playbackTime.toFixed(3)}s, AudioContext.currentTime=${audioContext.currentTime.toFixed(3)}s, バッファ時間=${bufferDurationSec.toFixed(3)}s`)
+        // playbackTimeは出力時刻なので、入力データの開始時刻はバッファ分だけ前
+        // これにより、キーイベントのタイムスタンプとオーディオデータが正しく同期する
+        const inputStartTime = playbackTime - bufferDurationSec
+        audioContextStartTimeRef.current = inputStartTime
+        console.log(`最初のオーディオチャンク受信: playbackTime=${playbackTime.toFixed(3)}s, 入力開始時刻=${inputStartTime.toFixed(3)}s, AudioContext.currentTime=${audioContext.currentTime.toFixed(3)}s, バッファ時間=${bufferDurationSec.toFixed(3)}s`)
         
         // 最初のチャンク前に発生したキーイベントを正しいタイムスタンプで再計算
         for (const audioTime of pendingKeyDownTimestampsRef.current) {
@@ -203,11 +206,13 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
         firstChunkReceivedRef.current = true
       }
       
-      // サンプル数とplaybackTimeのマッピングを保存（補正計算用）
+      // サンプル数と入力時刻のマッピングを保存（補正計算用）
+      // 入力データの時刻 = playbackTime - bufferDuration
       // このチャンクの終了時点でのマッピングを記録
+      const inputEndTime = playbackTime  // このチャンクの入力終了時刻（= 次のチャンクの入力開始時刻）
       sampleTimeMapRef.current.push({
         samples: totalSamplesRecorded + inputData.length,
-        playbackTime: playbackTime + (bufferSize / realSampleRate)  // チャンク終了時刻
+        playbackTime: inputEndTime  // 入力データの終了時刻
       })
       // メモリ節約のため、古いエントリを削除（直近30秒分だけ保持）
       const maxEntries = Math.ceil(30 * realSampleRate / bufferSize)
@@ -221,9 +226,9 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       
       // デバッグ: 蓄積サンプル数と時刻の整合性をチェック（1秒ごと）
       const expectedTimeMs = (totalSamplesRecorded / realSampleRate) * 1000
-      const actualTimeMs = (playbackTime + (bufferSize / realSampleRate) - audioContextStartTimeRef.current) * 1000
+      const actualTimeMs = (inputEndTime - audioContextStartTimeRef.current) * 1000
       if (Math.floor(totalSamplesRecorded / realSampleRate) > Math.floor((totalSamplesRecorded - inputData.length) / realSampleRate)) {
-        console.log(`[同期チェック] ${Math.floor(totalSamplesRecorded / realSampleRate)}秒経過: サンプル数ベース=${expectedTimeMs.toFixed(1)}ms, playbackTimeベース=${actualTimeMs.toFixed(1)}ms, 差=${(actualTimeMs - expectedTimeMs).toFixed(1)}ms`)
+        console.log(`[同期チェック] ${Math.floor(totalSamplesRecorded / realSampleRate)}秒経過: サンプル数ベース=${expectedTimeMs.toFixed(1)}ms, 入力時刻ベース=${actualTimeMs.toFixed(1)}ms, 差=${(actualTimeMs - expectedTimeMs).toFixed(1)}ms`)
       }
 
       // リアルタイム波形表示は無効化（処理負荷軽減のため）

@@ -47,6 +47,7 @@ interface MeasurementResult {
   keyUpTimestamps: number[]    // キーアップのタイムスタンプ (ms)
   peakIntervalMs: number
   recordingDurationMs: number  // 録音時間 (ms)
+  sampleRate: number           // サンプルレート (Hz)
   // 測定設定
   attackOffsetMs: number       // アタック音オフセット (ms)
   attackPeakAlign: boolean     // アタック音ピーク同期
@@ -137,6 +138,7 @@ export function KeytapVisualizer() {
         keyUpTimestamps: [...keyUpTimestamps],
         peakIntervalMs,
         recordingDurationMs: recordingDuration,
+        sampleRate, // 録音時のサンプルレート
         // 測定設定（現在のフック設定を保存）
         attackOffsetMs: windowOffsetMs,
         attackPeakAlign: peakAlignEnabled,
@@ -165,13 +167,16 @@ export function KeytapVisualizer() {
         return
       }
 
+      const measurementSampleRate = latestMeasurement.sampleRate || SAMPLE_RATE
+
       const attackResult = calculateMeasurementAttackWaveform(
         latestMeasurement.recordingData,
         latestMeasurement.keyDownTimestamps,
         latestMeasurement.keyUpTimestamps,
         latestMeasurement.attackOffsetMs,
         latestMeasurement.attackPeakAlign,
-        latestMeasurement.peakPositionMs
+        latestMeasurement.peakPositionMs,
+        measurementSampleRate
       )
 
       const releaseResult = calculateMeasurementReleaseWaveform(
@@ -180,7 +185,8 @@ export function KeytapVisualizer() {
         latestMeasurement.keyDownTimestamps,
         latestMeasurement.releaseOffsetMs,
         latestMeasurement.releasePeakAlign,
-        latestMeasurement.peakPositionMs
+        latestMeasurement.peakPositionMs,
+        measurementSampleRate
       )
 
       // windowsを保存
@@ -218,7 +224,8 @@ export function KeytapVisualizer() {
     keyUpTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    peakPosMs: number
+    peakPosMs: number,
+    targetSampleRate: number = SAMPLE_RATE
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyDownTimestamps.length < 3) {
       return { waveform: null, windows: [] }
@@ -234,7 +241,7 @@ export function KeytapVisualizer() {
       offsetMs,
       peakAlign,
       peakPositionMs: peakPosMs,
-      sampleRate: SAMPLE_RATE,
+      sampleRate: targetSampleRate,
     })
 
     return { waveform: result.waveform, windows: result.windows }
@@ -248,7 +255,8 @@ export function KeytapVisualizer() {
     keyDownTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    peakPosMs: number
+    peakPosMs: number,
+    targetSampleRate: number = SAMPLE_RATE
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyUpTimestamps.length < 2) {
       return { waveform: null, windows: [] }
@@ -270,7 +278,7 @@ export function KeytapVisualizer() {
       offsetMs,
       peakAlign,
       peakPositionMs: peakPosMs,
-      sampleRate: SAMPLE_RATE,
+      sampleRate: targetSampleRate,
     })
 
     return { waveform: result.waveform, windows: result.windows }
@@ -280,9 +288,10 @@ export function KeytapVisualizer() {
   const calculateMeasurementCombinedWaveform = useCallback((
     attackWaveform: Float32Array,
     releaseWaveform: Float32Array,
-    intervalMs: number
+    intervalMs: number,
+    targetSampleRate: number = SAMPLE_RATE
   ): Float32Array => {
-    return calculateCombinedWaveform(attackWaveform, releaseWaveform, intervalMs, SAMPLE_RATE)
+    return calculateCombinedWaveform(attackWaveform, releaseWaveform, intervalMs, targetSampleRate)
   }, [])
 
   // 測定データの設定を開く
@@ -317,6 +326,8 @@ export function KeytapVisualizer() {
       return
     }
 
+    const measurementSampleRate = measurement.sampleRate || SAMPLE_RATE
+
     console.log('[設定適用] パラメータ:', {
       editPeakIntervalInput,
       editAttackOffsetInput,
@@ -326,6 +337,7 @@ export function KeytapVisualizer() {
       editPeakPositionInput,
       keyDownTimestamps: measurement.keyDownTimestamps.length,
       keyUpTimestamps: measurement.keyUpTimestamps.length,
+      sampleRate: measurementSampleRate,
     })
 
     // アタック音を再計算
@@ -335,7 +347,8 @@ export function KeytapVisualizer() {
       measurement.keyUpTimestamps,
       editAttackOffsetInput,
       editAttackPeakAlignInput,
-      editPeakPositionInput
+      editPeakPositionInput,
+      measurementSampleRate
     )
     const newAttackWaveform = attackResult.waveform
     const newAttackWindows = attackResult.windows
@@ -348,7 +361,8 @@ export function KeytapVisualizer() {
       measurement.keyDownTimestamps,
       editReleaseOffsetInput,
       editReleasePeakAlignInput,
-      editPeakPositionInput
+      editPeakPositionInput,
+      measurementSampleRate
     )
     const newReleaseWaveform = releaseResult.waveform
     const newReleaseWindows = releaseResult.windows
@@ -360,7 +374,8 @@ export function KeytapVisualizer() {
       newCombinedWaveform = calculateMeasurementCombinedWaveform(
         newAttackWaveform,
         newReleaseWaveform,
-        editPeakIntervalInput
+        editPeakIntervalInput,
+        measurementSampleRate
       )
     }
     console.log('[設定適用] newCombinedWaveform:', newCombinedWaveform?.length)
@@ -506,11 +521,14 @@ export function KeytapVisualizer() {
       
       // 録音データを読み込み
       let recordingData: Float32Array | null = null
+      let importedSampleRate = metadata.audio.sampleRate || SAMPLE_RATE // メタデータから取得、なければデフォルト
       const recordingFile = files.find(f => f.name === 'recording.wav')
       if (recordingFile) {
         const decoded = decodeWav(recordingFile.data)
         if (decoded) {
           recordingData = decoded.samples
+          importedSampleRate = decoded.sampleRate // WAVファイルから正確なサンプルレートを取得
+          console.log(`[インポート] WAVファイルのサンプルレート: ${importedSampleRate}Hz`)
         }
       }
       
@@ -541,19 +559,20 @@ export function KeytapVisualizer() {
       let releaseWindows: WindowInfo[] = []
       
       if (recordingData && keyDownTimestamps.length >= 3) {
-        // アタック音を計算
+        // アタック音を計算（インポートしたサンプルレートを使用）
         const attackResult = calculateMeasurementAttackWaveform(
           recordingData,
           keyDownTimestamps,
           keyUpTimestamps,
           attackOffsetMs,
           attackPeakAlign,
-          peakPositionMs
+          peakPositionMs,
+          importedSampleRate
         )
         attackWaveform = attackResult.waveform
         attackWindows = attackResult.windows
         
-        // リリース音を計算
+        // リリース音を計算（インポートしたサンプルレートを使用）
         if (keyUpTimestamps.length >= 2) {
           const releaseResult = calculateMeasurementReleaseWaveform(
             recordingData,
@@ -561,18 +580,20 @@ export function KeytapVisualizer() {
             keyDownTimestamps,
             releaseOffsetMs,
             releasePeakAlign,
-            peakPositionMs
+            peakPositionMs,
+            importedSampleRate
           )
           releaseWaveform = releaseResult.waveform
           releaseWindows = releaseResult.windows
         }
         
-        // 合成波形を計算
+        // 合成波形を計算（インポートしたサンプルレートを使用）
         if (attackWaveform && releaseWaveform) {
           combinedWaveform = calculateMeasurementCombinedWaveform(
             attackWaveform,
             releaseWaveform,
-            peakIntervalMs
+            peakIntervalMs,
+            importedSampleRate
           )
         }
       }
@@ -594,6 +615,7 @@ export function KeytapVisualizer() {
         keyUpTimestamps,
         peakIntervalMs,
         recordingDurationMs: metadata.audio.recordingDurationMs || 4000,
+        sampleRate: importedSampleRate,
         attackOffsetMs,
         attackPeakAlign,
         releaseOffsetMs,
