@@ -81,7 +81,9 @@ export function KeytapVisualizer() {
   const {
     status,
     statusMessage,
+    recordingData: _recordingData, // eslint-disable-line @typescript-eslint/no-unused-vars
     finalRecordingData,
+    recordingProgress: _recordingProgress, // eslint-disable-line @typescript-eslint/no-unused-vars
     isRecording,
     canRecord,
     keyTapCount,
@@ -97,6 +99,7 @@ export function KeytapVisualizer() {
     peakAlignEnabled,
     waveformLengthMs,
     peakPositionMs,
+    sampleRate,
     startRecording,
     initializeAudio,
     setPeakPositionMs,
@@ -852,7 +855,7 @@ export function KeytapVisualizer() {
                             showKeyDownLine={false}
                             keyDownTimestamps={selectedMeasurement.keyDownTimestamps}
                             keyUpTimestamps={selectedMeasurement.keyUpTimestamps}
-                            sampleRate={SAMPLE_RATE}
+                            sampleRate={sampleRate}
                           />
                         </>
                       </CollapsibleSection>
@@ -876,7 +879,7 @@ export function KeytapVisualizer() {
                             windowOffsetMs={0}
                             peakAlignEnabled={true}
                             title={`平均化した打鍵音 (アタック→${selectedMeasurement.peakIntervalMs}ms→リリース)`}
-                            sampleRate={SAMPLE_RATE}
+                            sampleRate={sampleRate}
                           />
                         </>
                       </CollapsibleSection>
@@ -900,13 +903,13 @@ export function KeytapVisualizer() {
                             windowOffsetMs={0}
                             peakAlignEnabled={true}
                             title="アタック音 (KeyDown → KeyUp)"
-                            sampleRate={SAMPLE_RATE}
+                            sampleRate={sampleRate}
                           />
                           {selectedMeasurement.attackWindows.length > 0 && (
                             <WindowsDebugView
                               windows={selectedMeasurement.attackWindows}
                               title="アタック音 - 個別ウィンドウ"
-                              sampleRate={SAMPLE_RATE}
+                              sampleRate={sampleRate}
                             />
                           )}
                         </>
@@ -931,13 +934,13 @@ export function KeytapVisualizer() {
                             windowOffsetMs={0}
                             peakAlignEnabled={true}
                             title="リリース音 (KeyUp → KeyDown)"
-                            sampleRate={SAMPLE_RATE}
+                            sampleRate={sampleRate}
                           />
                           {selectedMeasurement.releaseWindows.length > 0 && (
                             <WindowsDebugView
                               windows={selectedMeasurement.releaseWindows}
                               title="リリース音 - 個別ウィンドウ"
-                              sampleRate={SAMPLE_RATE}
+                              sampleRate={sampleRate}
                             />
                           )}
                         </>
