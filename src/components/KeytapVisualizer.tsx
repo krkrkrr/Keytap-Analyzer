@@ -7,6 +7,7 @@ import { StatusMessage } from './StatusMessage'
 import { RecordButton } from './RecordButton'
 import { WindowsDebugView } from './WindowsDebugView'
 import { CollapsibleSection } from './CollapsibleSection'
+import { CompareView } from './CompareView'
 import { 
   encodeWav, 
   createPaxTar, 
@@ -29,7 +30,7 @@ const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
 const MIN_RECORDING_DURATION = 1000 // 最小1秒
 const MAX_RECORDING_DURATION = 30000 // 最大30秒
 
-type TabType = 'waveform' | 'analysis'
+type TabType = 'waveform' | 'analysis' | 'compare'
 
 // 測定結果の型定義
 interface MeasurementResult {
@@ -662,6 +663,12 @@ export function KeytapVisualizer() {
           >
             📊 解析
           </button>
+          <button
+            className={`${styles.tab} ${activeTab === 'compare' ? styles.tabActive : ''}`}
+            onClick={() => setActiveTab('compare')}
+          >
+            🔍 比較
+          </button>
         </div>
 
         {/* 新規タブ */}
@@ -937,6 +944,22 @@ export function KeytapVisualizer() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* 比較タブ */}
+        {activeTab === 'compare' && (
+          <div className={styles.tabPanel}>
+            <CompareView 
+              measurements={measurementHistory.map(m => ({
+                id: m.id,
+                name: m.name,
+                combinedWaveform: m.combinedWaveform,
+                attackWaveform: m.attackWaveform,
+                releaseWaveform: m.releaseWaveform,
+                recordingData: m.recordingData,
+              }))}
+            />
           </div>
         )}
 
