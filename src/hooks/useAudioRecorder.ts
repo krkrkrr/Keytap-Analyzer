@@ -1,14 +1,19 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { 
+  calculateSyncAveragedWaveform, 
+  calculateCombinedWaveform as calcCombined,
+  findPeakIndex
+} from '../utils/waveformProcessing'
 
 export type RecordingStatus = 'idle' | 'recording' | 'completed' | 'error'
 
 // 同期加算の設定
 const DEFAULT_WINDOW_OFFSET_MS = 5   // デフォルトのキータップ前オフセット (ms)
-const DEFAULT_RELEASE_OFFSET_MS = 5  // デフォルトのリリース音前オフセット (ms)
-const DEFAULT_PEAK_INTERVAL_MS = 20  // アタック音ピークからリリース音ピークまでのデフォルト間隔 (ms)
-const DEFAULT_WAVEFORM_LENGTH_MS = 100 // デフォルトの波形長 (ms)
+const DEFAULT_RELEASE_OFFSET_MS = 30 // デフォルトのリリース音前オフセット (ms) ※リリース音はKeyUp前に発生
+const DEFAULT_PEAK_INTERVAL_MS = 12  // アタック音ピークからリリース音ピークまでのデフォルト間隔 (ms)
+const DEFAULT_WAVEFORM_LENGTH_MS = 70 // デフォルトの波形長 (ms)
+const DEFAULT_PEAK_POSITION_MS = 10  // デフォルトのピーク位置オフセット (ms)
 const SAMPLE_RATE = 48000    // サンプルレート (Hz)
-const PEAK_SEARCH_WINDOW_MS = 50  // ピーク検出用の検索範囲 (ms)
 
 export interface UseAudioRecorderReturn {
   status: RecordingStatus
@@ -24,18 +29,20 @@ export interface UseAudioRecorderReturn {
   keyUpTimestamps: number[] // キーアップのタイムスタンプ (ms)
   averagedWaveform: Float32Array | null // アタック音の同期加算平均波形
   releaseWaveform: Float32Array | null // リリース音の同期加算平均波形
-  combinedWaveform: Float32Array | null // 合成された測定用音声
+  combinedWaveform: Float32Array | null // 合成された平均化した打鍵音
   windowOffsetMs: number // ウィンドウオフセット (ms)
   releaseOffsetMs: number // リリース音のウィンドウオフセット (ms)
   peakIntervalMs: number // アタック音ピークからリリース音ピークまでの間隔 (ms)
   peakAlignEnabled: boolean // ピーク同期モード
   waveformLengthMs: number // 波形長 (ms)
+  peakPositionMs: number // ピーク位置オフセット (ms)
   startRecording: () => Promise<void>
   initializeAudio: () => Promise<void>
   recalculateAveragedWaveform: (offsetMs: number, peakAlign: boolean) => void
   recalculateReleaseWaveform: (offsetMs: number, peakAlign: boolean) => void
   recalculateCombinedWaveform: (intervalMs: number) => void
   setWaveformLengthMs: (lengthMs: number) => void
+  setPeakPositionMs: (positionMs: number) => void
 }
 
 export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderReturn {
@@ -55,12 +62,15 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   const [peakIntervalMs, setPeakIntervalMs] = useState(DEFAULT_PEAK_INTERVAL_MS)
   const [peakAlignEnabled, setPeakAlignEnabled] = useState(false)
   const [waveformLengthMs, setWaveformLengthMs] = useState(DEFAULT_WAVEFORM_LENGTH_MS)
+  const [peakPositionMs, setPeakPositionMs] = useState(DEFAULT_PEAK_POSITION_MS)
+  const [actualSampleRate, setActualSampleRate] = useState(SAMPLE_RATE) // 実際のサンプルレート
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioInputRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const recordingStartTimeRef = useRef<number>(0)
+  const audioContextStartTimeRef = useRef<number>(0) // 録音開始時のAudioContext.currentTime (秒)
   const keyTimestampsRef = useRef<number[]>([])
   const keyUpTimestampsRef = useRef<number[]>([])
   const finalRecordingDataRef = useRef<Float32Array | null>(null)
@@ -117,6 +127,11 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     }
 
     const audioContext = audioContextRef.current
+    
+    // 実際のサンプルレートを取得して保存
+    const realSampleRate = audioContext.sampleRate
+    setActualSampleRate(realSampleRate)
+    console.log(`AudioContext サンプルレート: ${realSampleRate}Hz`)
 
     // AudioContextを再開（ユーザージェスチャーが必要な場合）
     if (audioContext.state === 'suspended') {
@@ -148,21 +163,45 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return combined
     }
 
+    // 録音されたサンプル数をトラッキング
+    let totalSamplesRecorded = 0
+    let isFirstChunk = true
+    let updateCounter = 0
+
     // 音声データを収集
     scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
       const inputBuffer = audioProcessingEvent.inputBuffer
       const inputData = inputBuffer.getChannelData(0)
+      
+      // 最初のチャンクが来た時点で、録音開始時刻を調整
+      // この時点でbufferSize分のデータが既に含まれているため、
+      // 録音開始時刻 = 現在のAudioContext.currentTime - bufferSize/sampleRate
+      if (isFirstChunk) {
+        const bufferDurationSec = bufferSize / realSampleRate
+        audioContextStartTimeRef.current = audioContext.currentTime - bufferDurationSec
+        console.log(`最初のオーディオチャンク受信: AudioContext.currentTime=${audioContext.currentTime.toFixed(3)}s, バッファ補正=${bufferDurationSec.toFixed(3)}s, 録音開始時刻=${audioContextStartTimeRef.current.toFixed(3)}s`)
+        isFirstChunk = false
+      }
+      
       // データをコピー
       recordingChunks.push(new Float32Array(inputData))
+      totalSamplesRecorded += inputData.length
 
-      // リアルタイムで波形を更新
-      setRecordingData(combineChunks(recordingChunks))
+      // リアルタイム波形表示は無効化（処理負荷軽減のため）
+      // updateCounter++
+      // if (updateCounter % 5 === 0) {
+      //   setRecordingData(combineChunks(recordingChunks))
+      // }
     }
 
     // オーディオグラフを接続
     audioInputRef.current.connect(analyserRef.current)
     analyserRef.current.connect(scriptProcessor)
     scriptProcessor.connect(audioContext.destination)
+    
+    // 初期値として接続時点のAudioContext.currentTimeを記録（最初のチャンクで補正される）
+    audioContextStartTimeRef.current = audioContext.currentTime
+    console.log(`オーディオグラフ接続: AudioContext.currentTime = ${audioContextStartTimeRef.current.toFixed(3)}秒`)
 
     // 指定時間後に録音を停止
     setTimeout(() => {
@@ -212,29 +251,11 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     setRecordingData(combinedData)
     finalRecordingDataRef.current = combinedData
 
-    // アタック音の同期加算処理を実行（デフォルトはピーク同期OFF）
-    calculateAveragedWaveform(combinedData, keyTimestampsRef.current, keyUpTimestampsRef.current, windowOffsetMs, false, waveformLengthMs)
-    // リリース音の同期加算処理を実行
-    calculateReleaseWaveform(combinedData, keyUpTimestampsRef.current, keyTimestampsRef.current, releaseOffsetMs, false, waveformLengthMs)
-  }, [windowOffsetMs, releaseOffsetMs, waveformLengthMs])
-
-  // ウィンドウ内のピーク位置を検出する関数
-  const findPeakIndex = useCallback((windowData: Float32Array, searchRangeSamples: number): number => {
-    let maxValue = 0
-    let peakIndex = 0
-    
-    // 検索範囲内でピークを探す
-    const searchEnd = Math.min(searchRangeSamples, windowData.length)
-    for (let i = 0; i < searchEnd; i++) {
-      const absValue = Math.abs(windowData[i])
-      if (absValue > maxValue) {
-        maxValue = absValue
-        peakIndex = i
-      }
-    }
-    
-    return peakIndex
-  }, [])
+    // アタック音の同期加算処理を実行（デフォルトはピーク同期ON）
+    calculateAveragedWaveform(combinedData, keyTimestampsRef.current, keyUpTimestampsRef.current, windowOffsetMs, true, waveformLengthMs, peakPositionMs)
+    // リリース音の同期加算処理を実行（デフォルトはピーク同期ON）
+    calculateReleaseWaveform(combinedData, keyUpTimestampsRef.current, keyTimestampsRef.current, releaseOffsetMs, true, waveformLengthMs, peakPositionMs)
+  }, [windowOffsetMs, releaseOffsetMs, waveformLengthMs, peakPositionMs])
 
   // アタック音の同期加算処理を行う関数（keydown から keyup まで）
   const calculateAveragedWaveform = useCallback((
@@ -243,7 +264,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     _keyUpTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    targetLengthMs: number
+    targetLengthMs: number,
+    peakPosMs: number  // ピーク位置オフセット (ms)
   ) => {
     // 最初と最後のウィンドウを除外するため、3つ以上のキータップが必要
     if (keyDownTimestamps.length < 3) {
@@ -256,109 +278,31 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     const trimmedDownTimestamps = keyDownTimestamps.slice(1, -1)
     console.log(`[アタック音] 元のキータップ数: ${keyDownTimestamps.length}, 使用するキータップ数: ${trimmedDownTimestamps.length} (最初と最後を除外)`)
 
-    // サンプルレートを取得
     const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
-    const windowOffsetSamples = Math.floor((offsetMs / 1000) * sampleRate)
-    const peakSearchSamples = Math.floor((PEAK_SEARCH_WINDOW_MS / 1000) * sampleRate)
-    const targetLengthSamples = Math.floor((targetLengthMs / 1000) * sampleRate)
-
-    // 固定長ウィンドウを使用（十分な長さを確保）
-    const rawWindowSize = targetLengthSamples + windowOffsetSamples + peakSearchSamples
-
     console.log(`[アタック音] オフセット: ${offsetMs}ms, ピーク同期: ${peakAlign}, 目標長: ${targetLengthMs}ms`)
 
-    if (peakAlign) {
-      // ピーク同期モード
-      // まず各ウィンドウを切り出し、ピーク位置を検出
-      const windows: { data: Float32Array; peakIndex: number }[] = []
-      
-      for (let i = 0; i < trimmedDownTimestamps.length; i++) {
-        const timestamp = trimmedDownTimestamps[i]
-        const sampleIndex = Math.floor((timestamp / 1000) * sampleRate)
-        const windowStart = sampleIndex - windowOffsetSamples
-        const windowEnd = Math.min(windowStart + rawWindowSize, audioData.length)
+    const result = calculateSyncAveragedWaveform({
+      audioData,
+      timestamps: trimmedDownTimestamps,
+      offsetMs,
+      peakAlign,
+      targetLengthMs,
+      peakPositionMs: peakPosMs,
+      sampleRate
+    })
 
-        if (windowStart >= 0 && windowEnd > windowStart) {
-          const windowData = audioData.slice(windowStart, windowEnd)
-          const peakIndex = findPeakIndex(windowData, peakSearchSamples)
-          windows.push({ data: windowData, peakIndex })
-          console.log(`Window ${i + 1}: ピーク位置 ${peakIndex} サンプル (${((peakIndex / sampleRate) * 1000).toFixed(1)}ms)`)
-        }
-      }
-
-      if (windows.length === 0) {
-        setStatus('completed')
-        setStatusMessage('録音完了！有効なウィンドウがありませんでした。')
-        return
-      }
-
-      // ピーク位置を10%の位置に配置し、残りを90%に
-      const peakPositionInOutput = Math.floor(targetLengthSamples * 0.1)
-      const outputWindowSize = targetLengthSamples
-
-      console.log(`ピーク同期: 出力長 ${outputWindowSize} サンプル (${targetLengthMs}ms), ピーク位置 ${peakPositionInOutput}`)
-
-      // ピーク位置を揃えて同期加算
-      const summedWaveform = new Float32Array(outputWindowSize)
-      
-      for (const window of windows) {
-        // ピークが出力の peakPositionInOutput に来るようにシフト
-        const shift = peakPositionInOutput - window.peakIndex
-        for (let j = 0; j < outputWindowSize; j++) {
-          const sourceIndex = j - shift
-          if (sourceIndex >= 0 && sourceIndex < window.data.length) {
-            summedWaveform[j] += window.data[sourceIndex]
-          }
-        }
-      }
-
-      // 平均化
-      for (let i = 0; i < outputWindowSize; i++) {
-        summedWaveform[i] /= windows.length
-      }
-
-      setAveragedWaveform(summedWaveform)
+    if (result.waveform) {
+      setAveragedWaveform(result.waveform)
       setWindowOffsetMs(offsetMs)
-      setPeakAlignEnabled(true)
+      setPeakAlignEnabled(peakAlign)
       setStatus('completed')
-      setStatusMessage(`録音完了！アタック: ${windows.length}回をピーク同期で加算 (${targetLengthMs}ms)`)
+      const modeText = peakAlign ? 'ピーク同期で加算' : '同期加算'
+      setStatusMessage(`録音完了！アタック: ${result.windowCount}回を${modeText} (${targetLengthMs}ms)`)
     } else {
-      // 従来の同期加算モード（キーイベント基準）
-      const outputWindowSize = targetLengthSamples
-      const summedWaveform = new Float32Array(outputWindowSize)
-      let validWindowCount = 0
-
-      for (let i = 0; i < trimmedDownTimestamps.length; i++) {
-        const timestamp = trimmedDownTimestamps[i]
-        const sampleIndex = Math.floor((timestamp / 1000) * sampleRate)
-        const windowStart = sampleIndex - windowOffsetSamples
-
-        if (windowStart >= 0) {
-          for (let j = 0; j < outputWindowSize; j++) {
-            const sourceIndex = windowStart + j
-            if (sourceIndex < audioData.length) {
-              summedWaveform[j] += audioData[sourceIndex]
-            }
-          }
-          validWindowCount++
-        }
-      }
-
-      if (validWindowCount > 0) {
-        for (let i = 0; i < outputWindowSize; i++) {
-          summedWaveform[i] /= validWindowCount
-        }
-        setAveragedWaveform(summedWaveform)
-        setWindowOffsetMs(offsetMs)
-        setPeakAlignEnabled(false)
-        setStatus('completed')
-        setStatusMessage(`録音完了！アタック: ${validWindowCount}回を同期加算 (オフセット: -${offsetMs}ms, ${targetLengthMs}ms)`)
-      } else {
-        setStatus('completed')
-        setStatusMessage('録音完了！有効なアタック音ウィンドウがありませんでした。')
-      }
+      setStatus('completed')
+      setStatusMessage('録音完了！有効なアタック音ウィンドウがありませんでした。')
     }
-  }, [findPeakIndex])
+  }, [])
 
   // リリース音の同期加算処理を行う関数（keyup から keydown まで）
   const calculateReleaseWaveform = useCallback((
@@ -367,7 +311,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     _keyDownTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    targetLengthMs: number
+    targetLengthMs: number,
+    peakPosMs: number  // ピーク位置オフセット (ms)
   ) => {
     // keyupが2つ以上必要
     if (keyUpTimestamps.length < 2) {
@@ -381,97 +326,31 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       : keyUpTimestamps.slice(0, 1)
     console.log(`[リリース音] 元のキーアップ数: ${keyUpTimestamps.length}, 使用するキーアップ数: ${trimmedUpTimestamps.length}`)
 
-    // サンプルレートを取得
     const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
-    const windowOffsetSamples = Math.floor((offsetMs / 1000) * sampleRate)
-    const peakSearchSamples = Math.floor((PEAK_SEARCH_WINDOW_MS / 1000) * sampleRate)
-    const targetLengthSamples = Math.floor((targetLengthMs / 1000) * sampleRate)
-
-    // 固定長ウィンドウを使用
-    const rawWindowSize = targetLengthSamples + windowOffsetSamples + peakSearchSamples
-
     console.log(`[リリース音] オフセット: ${offsetMs}ms, ピーク同期: ${peakAlign}, 目標長: ${targetLengthMs}ms`)
 
-    if (peakAlign) {
-      // ピーク同期モード
-      const windows: { data: Float32Array; peakIndex: number }[] = []
-      
-      for (const timestamp of trimmedUpTimestamps) {
-        const sampleIndex = Math.floor((timestamp / 1000) * sampleRate)
-        const windowStart = sampleIndex - windowOffsetSamples
-        const windowEnd = Math.min(windowStart + rawWindowSize, audioData.length)
+    const result = calculateSyncAveragedWaveform({
+      audioData,
+      timestamps: trimmedUpTimestamps,
+      offsetMs,
+      peakAlign,
+      targetLengthMs,
+      peakPositionMs: peakPosMs,
+      sampleRate
+    })
 
-        if (windowStart >= 0 && windowEnd > windowStart) {
-          const windowData = audioData.slice(windowStart, windowEnd)
-          const peakIndex = findPeakIndex(windowData, peakSearchSamples)
-          windows.push({ data: windowData, peakIndex })
-        }
-      }
-
-      if (windows.length === 0) {
-        console.log('[リリース音] 有効なウィンドウがありませんでした')
-        return
-      }
-
-      // ピーク位置を10%の位置に配置
-      const peakPositionInOutput = Math.floor(targetLengthSamples * 0.1)
-      const outputWindowSize = targetLengthSamples
-
-      // ピーク位置を揃えて同期加算
-      const summedWaveform = new Float32Array(outputWindowSize)
-      
-      for (const window of windows) {
-        const shift = peakPositionInOutput - window.peakIndex
-        for (let j = 0; j < outputWindowSize; j++) {
-          const sourceIndex = j - shift
-          if (sourceIndex >= 0 && sourceIndex < window.data.length) {
-            summedWaveform[j] += window.data[sourceIndex]
-          }
-        }
-      }
-
-      // 平均化
-      for (let i = 0; i < outputWindowSize; i++) {
-        summedWaveform[i] /= windows.length
-      }
-
-      setReleaseWaveform(summedWaveform)
+    if (result.waveform) {
+      setReleaseWaveform(result.waveform)
       setReleaseOffsetMs(offsetMs)
-      console.log(`[リリース音] ${windows.length}回をピーク同期で加算 (${targetLengthMs}ms)`)
+      const modeText = peakAlign ? 'ピーク同期で加算' : '同期加算'
+      console.log(`[リリース音] ${result.windowCount}回を${modeText} (${targetLengthMs}ms)`)
     } else {
-      // 従来の同期加算モード（キーイベント基準）
-      const outputWindowSize = targetLengthSamples
-      const summedWaveform = new Float32Array(outputWindowSize)
-      let validWindowCount = 0
-
-      for (const timestamp of trimmedUpTimestamps) {
-        const sampleIndex = Math.floor((timestamp / 1000) * sampleRate)
-        const windowStart = sampleIndex - windowOffsetSamples
-
-        if (windowStart >= 0) {
-          for (let j = 0; j < outputWindowSize; j++) {
-            const sourceIndex = windowStart + j
-            if (sourceIndex < audioData.length) {
-              summedWaveform[j] += audioData[sourceIndex]
-            }
-          }
-          validWindowCount++
-        }
-      }
-
-      if (validWindowCount > 0) {
-        for (let i = 0; i < outputWindowSize; i++) {
-          summedWaveform[i] /= validWindowCount
-        }
-        setReleaseWaveform(summedWaveform)
-        setReleaseOffsetMs(offsetMs)
-        console.log(`[リリース音] ${validWindowCount}回を同期加算 (オフセット: -${offsetMs}ms, ${targetLengthMs}ms)`)
-      }
+      console.log('[リリース音] 有効なウィンドウがありませんでした')
     }
-  }, [findPeakIndex])
+  }, [])
 
   // 合成波形を計算する関数（アタック音のピークからintervalMs後にリリース音のピークが来るように配置）
-  const calculateCombinedWaveform = useCallback((
+  const calculateCombinedWaveformLocal = useCallback((
     attackWaveform: Float32Array,
     releaseWaveformData: Float32Array,
     intervalMs: number
@@ -482,57 +361,14 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     }
 
     const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
-    const intervalSamples = Math.floor((intervalMs / 1000) * sampleRate)
-
-    // 各波形のピーク位置を検出
-    const findPeak = (waveform: Float32Array): number => {
-      let maxValue = 0
-      let peakIndex = 0
-      for (let i = 0; i < waveform.length; i++) {
-        const absValue = Math.abs(waveform[i])
-        if (absValue > maxValue) {
-          maxValue = absValue
-          peakIndex = i
-        }
-      }
-      return peakIndex
-    }
-
-    const attackPeakIndex = findPeak(attackWaveform)
-    const releasePeakIndex = findPeak(releaseWaveformData)
-
-    console.log(`[合成波形] アタックピーク: ${attackPeakIndex} (${((attackPeakIndex / sampleRate) * 1000).toFixed(1)}ms)`)
-    console.log(`[合成波形] リリースピーク: ${releasePeakIndex} (${((releasePeakIndex / sampleRate) * 1000).toFixed(1)}ms)`)
-    console.log(`[合成波形] ピーク間隔: ${intervalMs}ms (${intervalSamples} samples)`)
-
-    // 合成波形のサイズを計算
-    // アタック音のピーク位置をそのまま維持し、リリース音のピークがその後intervalSamples後に来るように配置
-    // リリース音の開始位置 = アタックピーク位置 + intervalSamples - リリースピーク位置
-    const releaseStartOffset = attackPeakIndex + intervalSamples - releasePeakIndex
     
-    // 合成波形の全長を計算
-    const attackEnd = attackWaveform.length
-    const releaseEnd = releaseStartOffset + releaseWaveformData.length
-    const combinedLength = Math.max(attackEnd, releaseEnd)
+    console.log(`[合成波形] アタックピーク: ${findPeakIndex(attackWaveform)} (${((findPeakIndex(attackWaveform) / sampleRate) * 1000).toFixed(1)}ms)`)
+    console.log(`[合成波形] リリースピーク: ${findPeakIndex(releaseWaveformData)} (${((findPeakIndex(releaseWaveformData) / sampleRate) * 1000).toFixed(1)}ms)`)
+    console.log(`[合成波形] ピーク間隔: ${intervalMs}ms`)
 
-    console.log(`[合成波形] リリース開始オフセット: ${releaseStartOffset} (${((releaseStartOffset / sampleRate) * 1000).toFixed(1)}ms)`)
-    console.log(`[合成波形] 合成波形長: ${combinedLength} (${((combinedLength / sampleRate) * 1000).toFixed(1)}ms)`)
-
-    // 合成波形を作成
-    const combined = new Float32Array(combinedLength)
-
-    // アタック音をコピー
-    for (let i = 0; i < attackWaveform.length; i++) {
-      combined[i] = attackWaveform[i]
-    }
-
-    // リリース音を加算
-    for (let i = 0; i < releaseWaveformData.length; i++) {
-      const targetIndex = releaseStartOffset + i
-      if (targetIndex >= 0 && targetIndex < combinedLength) {
-        combined[targetIndex] += releaseWaveformData[i]
-      }
-    }
+    const combined = calcCombined(attackWaveform, releaseWaveformData, intervalMs, sampleRate)
+    
+    console.log(`[合成波形] 合成波形長: ${combined.length} (${((combined.length / sampleRate) * 1000).toFixed(1)}ms)`)
 
     return combined
   }, [])
@@ -547,8 +383,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return
     }
     
-    calculateAveragedWaveform(audioData, keyDownTimestamps, keyUpTimestamps, offsetMs, peakAlign, waveformLengthMs)
-  }, [calculateAveragedWaveform, waveformLengthMs])
+    calculateAveragedWaveform(audioData, keyDownTimestamps, keyUpTimestamps, offsetMs, peakAlign, waveformLengthMs, peakPositionMs)
+  }, [calculateAveragedWaveform, waveformLengthMs, peakPositionMs])
 
   // リリース音のオフセットを変更した時に再計算する関数
   const recalculateReleaseWaveform = useCallback((offsetMs: number, peakAlign: boolean) => {
@@ -560,8 +396,8 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return
     }
     
-    calculateReleaseWaveform(audioData, keyUpTimestamps, keyDownTimestamps, offsetMs, peakAlign, waveformLengthMs)
-  }, [calculateReleaseWaveform, waveformLengthMs])
+    calculateReleaseWaveform(audioData, keyUpTimestamps, keyDownTimestamps, offsetMs, peakAlign, waveformLengthMs, peakPositionMs)
+  }, [calculateReleaseWaveform, waveformLengthMs, peakPositionMs])
 
   // 合成波形を再計算する関数
   const recalculateCombinedWaveform = useCallback((intervalMs: number) => {
@@ -573,31 +409,35 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return
     }
 
-    const combined = calculateCombinedWaveform(averagedWaveform, releaseWaveform, intervalMs)
+    const combined = calculateCombinedWaveformLocal(averagedWaveform, releaseWaveform, intervalMs)
     setCombinedWaveform(combined)
-  }, [averagedWaveform, releaseWaveform, calculateCombinedWaveform])
+  }, [averagedWaveform, releaseWaveform, calculateCombinedWaveformLocal])
 
   // アタック音またはリリース音が変更されたら合成波形を再計算
   useEffect(() => {
     if (averagedWaveform && releaseWaveform) {
-      const combined = calculateCombinedWaveform(averagedWaveform, releaseWaveform, peakIntervalMs)
+      const combined = calculateCombinedWaveformLocal(averagedWaveform, releaseWaveform, peakIntervalMs)
       setCombinedWaveform(combined)
     } else {
       setCombinedWaveform(null)
     }
-  }, [averagedWaveform, releaseWaveform, peakIntervalMs, calculateCombinedWaveform])
+  }, [averagedWaveform, releaseWaveform, peakIntervalMs, calculateCombinedWaveformLocal])
 
   // keydownイベントリスナー
   useEffect(() => {
     const handleKeyDown = (_event: KeyboardEvent) => {
       if (!isRecording) return
+      if (!audioContextRef.current) return
       
-      // 録音開始からの経過時間を記録
-      const elapsed = Date.now() - recordingStartTimeRef.current
-      keyTimestampsRef.current.push(elapsed)
+      // AudioContext.currentTimeを使ってオーディオタイムラインと同期したタイムスタンプを取得
+      const currentAudioTime = audioContextRef.current.currentTime
+      const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
+      const elapsedMs = elapsedSeconds * 1000
+      
+      keyTimestampsRef.current.push(elapsedMs)
       setKeyTapCount(keyTimestampsRef.current.length)
       
-      console.log(`KeyDown detected at ${elapsed}ms`)
+      console.log(`KeyDown detected at ${elapsedMs.toFixed(1)}ms (AudioContext.currentTime=${currentAudioTime.toFixed(3)}s)`)
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -610,13 +450,17 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   useEffect(() => {
     const handleKeyUp = (_event: KeyboardEvent) => {
       if (!isRecording) return
+      if (!audioContextRef.current) return
       
-      // 録音開始からの経過時間を記録
-      const elapsed = Date.now() - recordingStartTimeRef.current
-      keyUpTimestampsRef.current.push(elapsed)
+      // AudioContext.currentTimeを使ってオーディオタイムラインと同期したタイムスタンプを取得
+      const currentAudioTime = audioContextRef.current.currentTime
+      const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
+      const elapsedMs = elapsedSeconds * 1000
+      
+      keyUpTimestampsRef.current.push(elapsedMs)
       setKeyUpCount(keyUpTimestampsRef.current.length)
       
-      console.log(`KeyUp detected at ${elapsed}ms`)
+      console.log(`KeyUp detected at ${elapsedMs.toFixed(1)}ms (AudioContext.currentTime=${currentAudioTime.toFixed(3)}s)`)
     }
 
     window.addEventListener('keyup', handleKeyUp)
@@ -645,11 +489,14 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     peakIntervalMs,
     peakAlignEnabled,
     waveformLengthMs,
+    peakPositionMs,
+    sampleRate: actualSampleRate,
     startRecording,
     initializeAudio,
     recalculateAveragedWaveform,
     recalculateReleaseWaveform,
     recalculateCombinedWaveform,
     setWaveformLengthMs,
+    setPeakPositionMs,
   }
 }

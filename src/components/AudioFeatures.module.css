@@ -53,8 +53,36 @@
   background-color: #f9f9f9;
 }
 
+.sectionRow {
+  background-color: #e8f4f8 !important;
+  height: 28px;
+}
+
+.sectionHeader {
+  font-weight: 700;
+  color: #0277bd;
+  padding: 8px !important;
+  font-size: 14px;
+}
+
+.sectionRow:hover {
+  background-color: #e8f4f8 !important;
+}
+
 .featureName {
   white-space: nowrap;
+}
+
+.deprecatedBadge {
+  display: inline;
+  margin-left: 8px;
+  font-size: 11px;
+  color: #d32f2f;
+  font-weight: 600;
+}
+
+.deprecatedFeature {
+  display: none;
 }
 
 .englishName {
@@ -76,10 +104,23 @@
   white-space: nowrap;
 }
 
+.featureUnit {
+  font-size: 12px;
+  color: #888;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.featureRange {
+  font-size: 11px;
+  color: #999;
+  white-space: nowrap;
+}
+
 .featureDesc {
   font-size: 12px;
   color: #666;
-  max-width: 300px;
+  max-width: 250px;
 }
 
 /* Loudness styles */
@@ -107,12 +148,6 @@
   color: #2196F3;
 }
 
-.barkBands {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 /* Bar chart styles */
 .barChart {
   display: flex;
@@ -135,48 +170,6 @@
 
 .bar:hover {
   background-color: #45a049;
-}
-
-/* MFCC styles */
-.mfccContainer {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.mfccBar {
-  flex: 1;
-  min-width: 20px;
-  position: absolute;
-  left: 0;
-  right: 0;
-  border-radius: 2px;
-  transition: height 0.2s ease;
-}
-
-.mfccContainer .barChart {
-  position: relative;
-  height: 100px;
-  align-items: center;
-}
-
-.mfccContainer .barChart > div {
-  position: relative;
-  flex: 1;
-  height: 100%;
-}
-
-.mfccLabels {
-  display: flex;
-  gap: 2px;
-  padding: 0 8px;
-}
-
-.mfccLabels span {
-  flex: 1;
-  text-align: center;
-  font-size: 10px;
-  color: #888;
 }
 
 /* Chroma styles */

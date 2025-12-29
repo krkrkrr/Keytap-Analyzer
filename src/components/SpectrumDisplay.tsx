@@ -134,7 +134,7 @@ export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumD
   const spectrumCanvasRef = useRef<HTMLCanvasElement>(null)
   const spectrogramCanvasRef = useRef<HTMLCanvasElement>(null)
   const [fftSize, setFftSize] = useState(2048)
-  const [maxFreq, setMaxFreq] = useState(10000)
+  const [maxFreq, setMaxFreq] = useState(20000)
   const [freqScale, setFreqScale] = useState<'log' | 'linear'>('log')
 
   // パワースペクトル計算
