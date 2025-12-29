@@ -72,6 +72,9 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   const analyserRef = useRef<AnalyserNode | null>(null)
   const recordingStartTimeRef = useRef<number>(0)
   const audioContextStartTimeRef = useRef<number>(0) // 録音開始時のAudioContext.currentTime (秒)
+  const firstChunkReceivedRef = useRef<boolean>(false) // 最初のオーディオチャンクを受信したかどうか
+  const pendingKeyDownTimestampsRef = useRef<number[]>([]) // 最初のチャンク前のキーダウンイベント（AudioContext.currentTime）
+  const pendingKeyUpTimestampsRef = useRef<number[]>([]) // 最初のチャンク前のキーアップイベント（AudioContext.currentTime）
   const keyTimestampsRef = useRef<number[]>([])
   const keyUpTimestampsRef = useRef<number[]>([])
   const finalRecordingDataRef = useRef<Float32Array | null>(null)
@@ -154,7 +157,11 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
 
     // 録音されたサンプル数をトラッキング
     let totalSamplesRecorded = 0
-    let isFirstChunk = true
+
+    // 最初のチャンク前フラグをリセット
+    firstChunkReceivedRef.current = false
+    pendingKeyDownTimestampsRef.current = []
+    pendingKeyUpTimestampsRef.current = []
 
     // 音声データを収集
     scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
@@ -164,11 +171,28 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       // 最初のチャンクが来た時点で、録音開始時刻を調整
       // この時点でbufferSize分のデータが既に含まれているため、
       // 録音開始時刻 = 現在のAudioContext.currentTime - bufferSize/sampleRate
-      if (isFirstChunk) {
+      if (!firstChunkReceivedRef.current) {
         const bufferDurationSec = bufferSize / realSampleRate
         audioContextStartTimeRef.current = audioContext.currentTime - bufferDurationSec
         console.log(`最初のオーディオチャンク受信: AudioContext.currentTime=${audioContext.currentTime.toFixed(3)}s, バッファ補正=${bufferDurationSec.toFixed(3)}s, 録音開始時刻=${audioContextStartTimeRef.current.toFixed(3)}s`)
-        isFirstChunk = false
+        
+        // 最初のチャンク前に発生したキーイベントを正しいタイムスタンプで再計算
+        for (const audioTime of pendingKeyDownTimestampsRef.current) {
+          const elapsedMs = (audioTime - audioContextStartTimeRef.current) * 1000
+          keyTimestampsRef.current.push(elapsedMs)
+          console.log(`[遅延処理] KeyDown at ${elapsedMs.toFixed(1)}ms (原AudioContext.currentTime=${audioTime.toFixed(3)}s)`)
+        }
+        for (const audioTime of pendingKeyUpTimestampsRef.current) {
+          const elapsedMs = (audioTime - audioContextStartTimeRef.current) * 1000
+          keyUpTimestampsRef.current.push(elapsedMs)
+          console.log(`[遅延処理] KeyUp at ${elapsedMs.toFixed(1)}ms (原AudioContext.currentTime=${audioTime.toFixed(3)}s)`)
+        }
+        setKeyTapCount(keyTimestampsRef.current.length)
+        setKeyUpCount(keyUpTimestampsRef.current.length)
+        
+        pendingKeyDownTimestampsRef.current = []
+        pendingKeyUpTimestampsRef.current = []
+        firstChunkReceivedRef.current = true
       }
       
       // データをコピー
@@ -417,8 +441,17 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       if (!isRecording) return
       if (!audioContextRef.current) return
       
-      // AudioContext.currentTimeを使ってオーディオタイムラインと同期したタイムスタンプを取得
+      // AudioContext.currentTimeを取得
       const currentAudioTime = audioContextRef.current.currentTime
+      
+      // 最初のオーディオチャンクがまだ来ていない場合は、タイムスタンプを保留
+      if (!firstChunkReceivedRef.current) {
+        pendingKeyDownTimestampsRef.current.push(currentAudioTime)
+        console.log(`KeyDown detected (pending) AudioContext.currentTime=${currentAudioTime.toFixed(3)}s`)
+        return
+      }
+      
+      // 通常処理：オーディオタイムラインと同期したタイムスタンプを計算
       const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
       const elapsedMs = elapsedSeconds * 1000
       
@@ -440,8 +473,17 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       if (!isRecording) return
       if (!audioContextRef.current) return
       
-      // AudioContext.currentTimeを使ってオーディオタイムラインと同期したタイムスタンプを取得
+      // AudioContext.currentTimeを取得
       const currentAudioTime = audioContextRef.current.currentTime
+      
+      // 最初のオーディオチャンクがまだ来ていない場合は、タイムスタンプを保留
+      if (!firstChunkReceivedRef.current) {
+        pendingKeyUpTimestampsRef.current.push(currentAudioTime)
+        console.log(`KeyUp detected (pending) AudioContext.currentTime=${currentAudioTime.toFixed(3)}s`)
+        return
+      }
+      
+      // 通常処理：オーディオタイムラインと同期したタイムスタンプを計算
       const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
       const elapsedMs = elapsedSeconds * 1000
       
