@@ -2,9 +2,6 @@
  * 波形同期加算処理のユーティリティ関数
  */
 
-// ピーク検索ウィンドウ（ms）
-export const PEAK_SEARCH_WINDOW_MS = 50
-
 /**
  * ウィンドウ内のピーク位置を検出する
  * @param data 波形データ
@@ -35,17 +32,16 @@ export function findPeakIndex(
 }
 
 /**
- * 同期加算処理のパラメータ
+ * 同期加算処理のパラメータ（動的ウィンドウ計算対応）
  */
 export interface SyncAverageParams {
   audioData: Float32Array
-  timestamps: number[]
-  offsetMs: number
-  peakAlign: boolean
-  targetLengthMs: number
-  peakPositionMs: number
+  timestamps: number[]              // 基準となるタイムスタンプ（KeyDown or KeyUp）
+  endTimestamps: number[]           // 各ウィンドウの終端タイムスタンプ
+  offsetMs: number                  // ウィンドウ開始位置の前方オフセット
+  peakAlign: boolean                // ピーク同期モード
+  peakPositionMs: number            // 出力波形内のピーク位置
   sampleRate: number
-  useMinWindowLength?: boolean  // trueの場合、最小ウィンドウ長に合わせる
 }
 
 /**
@@ -55,6 +51,7 @@ export interface WindowInfo {
   data: Float32Array
   peakIndex: number
   timestampMs: number
+  windowLengthMs: number  // このウィンドウの長さ（ms）
 }
 
 /**
@@ -63,11 +60,45 @@ export interface WindowInfo {
 export interface SyncAverageResult {
   waveform: Float32Array | null
   windowCount: number
-  windows: WindowInfo[]  // 個別ウィンドウのデータ
+  windows: WindowInfo[]
+  outputLengthMs: number  // 出力波形の長さ（ms）
 }
 
 /**
- * 同期加算処理を実行する共通関数
+ * キーイベント間隔に基づいてウィンドウ終端を計算する
+ * @param timestamps 基準タイムスタンプ（例：keyDown）
+ * @param alternateTimestamps 別種のタイムスタンプ（例：keyUp）
+ * @returns 各タイムスタンプに対するウィンドウ終端タイムスタンプ
+ */
+export function calculateWindowEndTimestamps(
+  timestamps: number[],
+  alternateTimestamps: number[]
+): number[] {
+  const endTimestamps: number[] = []
+  
+  for (let i = 0; i < timestamps.length; i++) {
+    const currentTime = timestamps[i]
+    const nextSameTime = timestamps[i + 1] ?? Infinity
+    
+    // alternateTimestamps から currentTime より後の最初のタイムスタンプを探す
+    let nextAlternateTime = Infinity
+    for (const altTime of alternateTimestamps) {
+      if (altTime > currentTime) {
+        nextAlternateTime = altTime
+        break
+      }
+    }
+    
+    // 次のイベント（同種または別種）の早い方をウィンドウ終端とする
+    const endTime = Math.min(nextSameTime, nextAlternateTime)
+    endTimestamps.push(endTime === Infinity ? currentTime + 100 : endTime) // フォールバック: 100ms
+  }
+  
+  return endTimestamps
+}
+
+/**
+ * 同期加算処理を実行する（動的ウィンドウ長対応）
  * @param params 同期加算のパラメータ
  * @returns 同期加算された波形と有効ウィンドウ数
  */
@@ -75,58 +106,76 @@ export function calculateSyncAveragedWaveform(params: SyncAverageParams): SyncAv
   const {
     audioData,
     timestamps,
+    endTimestamps,
     offsetMs,
     peakAlign,
-    targetLengthMs,
     peakPositionMs,
     sampleRate,
-    useMinWindowLength = false
   } = params
 
   if (timestamps.length === 0) {
-    return { waveform: null, windowCount: 0, windows: [] }
+    return { waveform: null, windowCount: 0, windows: [], outputLengthMs: 0 }
   }
 
   const windowOffsetSamples = Math.floor((offsetMs / 1000) * sampleRate)
-  const peakSearchSamples = Math.floor((PEAK_SEARCH_WINDOW_MS / 1000) * sampleRate)
-  const targetLengthSamples = Math.floor((targetLengthMs / 1000) * sampleRate)
-  const rawWindowSize = targetLengthSamples + windowOffsetSamples + peakSearchSamples
 
-  // 個別ウィンドウを収集
+  // 個別ウィンドウを収集（各ウィンドウは動的な長さ）
   const windowInfos: WindowInfo[] = []
   
   for (let i = 0; i < timestamps.length; i++) {
     const timestamp = timestamps[i]
+    const endTimestamp = endTimestamps[i] ?? timestamp + 100 // フォールバック
+    
     const sampleIndex = Math.floor((timestamp / 1000) * sampleRate)
+    const endSampleIndex = Math.floor((endTimestamp / 1000) * sampleRate)
+    
     const windowStart = sampleIndex - windowOffsetSamples
-    const windowEnd = Math.min(windowStart + rawWindowSize, audioData.length)
+    const windowEnd = Math.min(endSampleIndex + windowOffsetSamples, audioData.length)
+    const windowLengthMs = (endTimestamp - timestamp) + offsetMs * 2
 
     if (windowStart >= 0 && windowEnd > windowStart) {
       const windowData = audioData.slice(windowStart, windowEnd)
-      // タイムスタンプ位置（windowOffsetSamples）周辺でピークを検索
-      const peakIndex = findPeakIndex(windowData, windowOffsetSamples, peakSearchSamples)
-      windowInfos.push({ data: windowData, peakIndex, timestampMs: timestamp })
+      // ウィンドウ全体でピークを検索
+      const peakIndex = findPeakIndex(windowData)
+      windowInfos.push({ 
+        data: windowData, 
+        peakIndex, 
+        timestampMs: timestamp,
+        windowLengthMs 
+      })
     }
   }
 
   if (windowInfos.length === 0) {
-    return { waveform: null, windowCount: 0, windows: [] }
+    return { waveform: null, windowCount: 0, windows: [], outputLengthMs: 0 }
   }
 
-  // 最小ウィンドウ長を使用する場合は、全ウィンドウの最小長を計算
-  let effectiveOutputSize = targetLengthSamples
-  if (useMinWindowLength) {
-    const minWindowLength = Math.min(...windowInfos.map(w => w.data.length))
-    effectiveOutputSize = Math.min(minWindowLength, targetLengthSamples)
-    console.log(`[最小ウィンドウ長] 使用: ${effectiveOutputSize}サンプル (${(effectiveOutputSize / sampleRate * 1000).toFixed(1)}ms)`)
+  // ピーク同期後の有効範囲を計算
+  const peakPositionInOutput = Math.floor((peakPositionMs / 1000) * sampleRate)
+  
+  // 各ウィンドウについて、ピーク位置を peakPositionInOutput に揃えたときの
+  // 有効範囲（全ウィンドウがデータを持っている範囲）を計算
+  let minStartOffset = 0  // ピーク位置より前の最小サンプル数
+  let minEndOffset = Infinity  // ピーク位置より後の最小サンプル数
+  
+  for (const window of windowInfos) {
+    const beforePeak = window.peakIndex  // ピーク位置より前のサンプル数
+    const afterPeak = window.data.length - window.peakIndex - 1  // ピーク位置より後のサンプル数
+    
+    minStartOffset = Math.max(minStartOffset, peakPositionInOutput - beforePeak)
+    minEndOffset = Math.min(minEndOffset, afterPeak)
   }
+  
+  // 出力サイズ: ピーク位置 + ピーク後の最小サンプル数 + 1
+  const outputWindowSize = peakPositionInOutput + minEndOffset + 1
+  const outputLengthMs = (outputWindowSize / sampleRate) * 1000
+  
+  console.log(`[同期加算] ウィンドウ数: ${windowInfos.length}, 出力サイズ: ${outputWindowSize}サンプル (${outputLengthMs.toFixed(1)}ms)`)
 
   if (peakAlign) {
     // ピーク同期モード
-    // ピーク位置を peakPositionMs の位置に配置
-    const peakPositionInOutput = Math.floor((peakPositionMs / 1000) * sampleRate)
-    const outputWindowSize = effectiveOutputSize
     const summedWaveform = new Float32Array(outputWindowSize)
+    const sampleCounts = new Float32Array(outputWindowSize) // 各サンプル位置の有効ウィンドウ数
     
     // ピーク位置を揃えて同期加算
     for (const window of windowInfos) {
@@ -135,34 +184,40 @@ export function calculateSyncAveragedWaveform(params: SyncAverageParams): SyncAv
         const sourceIndex = j - shift
         if (sourceIndex >= 0 && sourceIndex < window.data.length) {
           summedWaveform[j] += window.data[sourceIndex]
+          sampleCounts[j] += 1
         }
       }
     }
 
-    // 平均化
+    // 平均化（各サンプル位置で有効なウィンドウ数で割る）
     for (let i = 0; i < outputWindowSize; i++) {
-      summedWaveform[i] /= windowInfos.length
+      if (sampleCounts[i] > 0) {
+        summedWaveform[i] /= sampleCounts[i]
+      }
     }
 
-    return { waveform: summedWaveform, windowCount: windowInfos.length, windows: windowInfos }
+    return { waveform: summedWaveform, windowCount: windowInfos.length, windows: windowInfos, outputLengthMs }
   } else {
     // 従来の同期加算モード（キーイベント基準）
-    const outputWindowSize = effectiveOutputSize
     const summedWaveform = new Float32Array(outputWindowSize)
+    const sampleCounts = new Float32Array(outputWindowSize)
 
     for (const window of windowInfos) {
       for (let j = 0; j < outputWindowSize; j++) {
         if (j < window.data.length) {
           summedWaveform[j] += window.data[j]
+          sampleCounts[j] += 1
         }
       }
     }
 
     for (let i = 0; i < outputWindowSize; i++) {
-      summedWaveform[i] /= windowInfos.length
+      if (sampleCounts[i] > 0) {
+        summedWaveform[i] /= sampleCounts[i]
+      }
     }
     
-    return { waveform: summedWaveform, windowCount: windowInfos.length, windows: windowInfos }
+    return { waveform: summedWaveform, windowCount: windowInfos.length, windows: windowInfos, outputLengthMs }
   }
 }
 

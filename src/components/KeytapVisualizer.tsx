@@ -7,6 +7,7 @@ import { StatusMessage } from './StatusMessage'
 import { RecordButton } from './RecordButton'
 import { WindowsDebugView } from './WindowsDebugView'
 import { CollapsibleSection } from './CollapsibleSection'
+import { CompareView } from './CompareView'
 import { 
   encodeWav, 
   createPaxTar, 
@@ -18,6 +19,7 @@ import {
 import {
   calculateSyncAveragedWaveform,
   calculateCombinedWaveform,
+  calculateWindowEndTimestamps,
   type WindowInfo
 } from '../utils/waveformProcessing'
 import styles from './KeytapVisualizer.module.css'
@@ -28,7 +30,7 @@ const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
 const MIN_RECORDING_DURATION = 1000 // 最小1秒
 const MAX_RECORDING_DURATION = 30000 // 最大30秒
 
-type TabType = 'waveform' | 'analysis'
+type TabType = 'waveform' | 'analysis' | 'compare'
 
 // 測定結果の型定義
 interface MeasurementResult {
@@ -46,13 +48,11 @@ interface MeasurementResult {
   peakIntervalMs: number
   recordingDurationMs: number  // 録音時間 (ms)
   // 測定設定
-  waveformLengthMs: number     // 波形長 (ms)
   attackOffsetMs: number       // アタック音オフセット (ms)
   attackPeakAlign: boolean     // アタック音ピーク同期
   releaseOffsetMs: number      // リリース音オフセット (ms)
   releasePeakAlign: boolean    // リリース音ピーク同期
   peakPositionMs: number       // ピーク位置オフセット (ms)
-  useMinWindowLength: boolean  // 最小ウィンドウ長を使用
   // デバッグ用ウィンドウデータ
   attackWindows: WindowInfo[]  // アタック音の個別ウィンドウ
   releaseWindows: WindowInfo[] // リリース音の個別ウィンドウ
@@ -69,14 +69,12 @@ export function KeytapVisualizer() {
   // 設定モーダル用の状態
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
   const [editingMeasurementId, setEditingMeasurementId] = useState<number | null>(null)
-  const [editWaveformLengthInput, setEditWaveformLengthInput] = useState(70)
   const [editPeakIntervalInput, setEditPeakIntervalInput] = useState(12)
   const [editAttackOffsetInput, setEditAttackOffsetInput] = useState(10)
   const [editAttackPeakAlignInput, setEditAttackPeakAlignInput] = useState(true)
   const [editReleaseOffsetInput, setEditReleaseOffsetInput] = useState(10)
   const [editReleasePeakAlignInput, setEditReleasePeakAlignInput] = useState(true)
   const [editPeakPositionInput, setEditPeakPositionInput] = useState(10)
-  const [editUseMinWindowLengthInput, setEditUseMinWindowLengthInput] = useState(true) // 最小ウィンドウ長を使用
   
   const {
     status,
@@ -97,7 +95,6 @@ export function KeytapVisualizer() {
     releaseOffsetMs,
     peakIntervalMs,
     peakAlignEnabled,
-    waveformLengthMs,
     peakPositionMs,
     sampleRate,
     startRecording,
@@ -141,19 +138,17 @@ export function KeytapVisualizer() {
         peakIntervalMs,
         recordingDurationMs: recordingDuration,
         // 測定設定（現在のフック設定を保存）
-        waveformLengthMs,
         attackOffsetMs: windowOffsetMs,
         attackPeakAlign: peakAlignEnabled,
         releaseOffsetMs,
         releasePeakAlign: true, // デフォルトはtrue
         peakPositionMs,
-        useMinWindowLength: true, // デフォルトで最小ウィンドウ長を使用
       }
       setMeasurementHistory(prev => [...prev, newMeasurement])
       setSelectedMeasurementId(nextMeasurementId)
       setNextMeasurementId(prev => prev + 1)
     }
-  }, [status, averagedWaveform, combinedWaveform, releaseWaveform, finalRecordingData, keyTapCount, keyUpCount, keyDownTimestamps, keyUpTimestamps, peakIntervalMs, recordingDuration, waveformLengthMs, windowOffsetMs, peakAlignEnabled, releaseOffsetMs, peakPositionMs, nextMeasurementId])
+  }, [status, averagedWaveform, combinedWaveform, releaseWaveform, finalRecordingData, keyTapCount, keyUpCount, keyDownTimestamps, keyUpTimestamps, peakIntervalMs, recordingDuration, windowOffsetMs, peakAlignEnabled, releaseOffsetMs, peakPositionMs, nextMeasurementId])
 
   // 新規測定追加後、個別ウィンドウ情報を計算して追加
   useEffect(() => {
@@ -173,21 +168,19 @@ export function KeytapVisualizer() {
       const attackResult = calculateMeasurementAttackWaveform(
         latestMeasurement.recordingData,
         latestMeasurement.keyDownTimestamps,
+        latestMeasurement.keyUpTimestamps,
         latestMeasurement.attackOffsetMs,
         latestMeasurement.attackPeakAlign,
-        latestMeasurement.waveformLengthMs,
-        latestMeasurement.peakPositionMs,
-        latestMeasurement.useMinWindowLength
+        latestMeasurement.peakPositionMs
       )
 
       const releaseResult = calculateMeasurementReleaseWaveform(
         latestMeasurement.recordingData,
         latestMeasurement.keyUpTimestamps,
+        latestMeasurement.keyDownTimestamps,
         latestMeasurement.releaseOffsetMs,
         latestMeasurement.releasePeakAlign,
-        latestMeasurement.waveformLengthMs,
-        latestMeasurement.peakPositionMs,
-        latestMeasurement.useMinWindowLength
+        latestMeasurement.peakPositionMs
       )
 
       // windowsを保存
@@ -211,7 +204,6 @@ export function KeytapVisualizer() {
     if (selectedMeasurement) {
       console.log('[デバッグ] selectedMeasurement 更新:', {
         id: selectedMeasurement.id,
-        waveformLengthMs: selectedMeasurement.waveformLengthMs,
         attackWaveformLength: selectedMeasurement.attackWaveform?.length,
         combinedWaveformLength: selectedMeasurement.combinedWaveform?.length,
       })
@@ -219,44 +211,44 @@ export function KeytapVisualizer() {
   }, [selectedMeasurement])
 
   // アタック音の同期加算処理（測定データ用）
+  // keyDown → 次のkeyUp または 次のkeyDown の早い方まで
   const calculateMeasurementAttackWaveform = useCallback((
     audioData: Float32Array,
     keyDownTimestamps: number[],
+    keyUpTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    targetLengthMs: number,
-    peakPosMs: number,
-    useMinWinLength: boolean = false
+    peakPosMs: number
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyDownTimestamps.length < 3) {
       return { waveform: null, windows: [] }
     }
 
     const trimmedDownTimestamps = keyDownTimestamps.slice(1, -1)
+    const endTimestamps = calculateWindowEndTimestamps(trimmedDownTimestamps, keyUpTimestamps)
     
     const result = calculateSyncAveragedWaveform({
       audioData,
       timestamps: trimmedDownTimestamps,
+      endTimestamps,
       offsetMs,
       peakAlign,
-      targetLengthMs,
       peakPositionMs: peakPosMs,
       sampleRate: SAMPLE_RATE,
-      useMinWindowLength: useMinWinLength
     })
 
     return { waveform: result.waveform, windows: result.windows }
   }, [])
 
   // リリース音の同期加算処理（測定データ用）
+  // keyUp → 次のkeyDown または 次のkeyUp の早い方まで
   const calculateMeasurementReleaseWaveform = useCallback((
     audioData: Float32Array,
     keyUpTimestamps: number[],
+    keyDownTimestamps: number[],
     offsetMs: number,
     peakAlign: boolean,
-    targetLengthMs: number,
-    peakPosMs: number,
-    useMinWinLength: boolean = false
+    peakPosMs: number
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyUpTimestamps.length < 2) {
       return { waveform: null, windows: [] }
@@ -266,15 +258,19 @@ export function KeytapVisualizer() {
       ? keyUpTimestamps.slice(1, -1) 
       : keyUpTimestamps.slice(0, 1)
 
+    // リリース音の場合：keyUp → 次のkeyDown または 次のkeyUp の早い方まで
+    // trimmedUpTimestamps に対応するendTimestamps を計算
+    // keyDownTimestamps と keyUpTimestamps の両方を考慮する
+    const endTimestamps = calculateWindowEndTimestamps(trimmedUpTimestamps, [...keyDownTimestamps, ...keyUpTimestamps].sort((a, b) => a - b))
+
     const result = calculateSyncAveragedWaveform({
       audioData,
       timestamps: trimmedUpTimestamps,
+      endTimestamps,
       offsetMs,
       peakAlign,
-      targetLengthMs,
       peakPositionMs: peakPosMs,
       sampleRate: SAMPLE_RATE,
-      useMinWindowLength: useMinWinLength
     })
 
     return { waveform: result.waveform, windows: result.windows }
@@ -292,14 +288,12 @@ export function KeytapVisualizer() {
   // 測定データの設定を開く
   const handleOpenMeasurementSettings = useCallback((measurement: MeasurementResult) => {
     setEditingMeasurementId(measurement.id)
-    setEditWaveformLengthInput(measurement.waveformLengthMs ?? 70)
     setEditPeakIntervalInput(measurement.peakIntervalMs)
     setEditAttackOffsetInput(measurement.attackOffsetMs ?? 10)
     setEditAttackPeakAlignInput(measurement.attackPeakAlign ?? true)
     setEditReleaseOffsetInput(measurement.releaseOffsetMs ?? 10)
     setEditReleasePeakAlignInput(measurement.releasePeakAlign ?? true)
     setEditPeakPositionInput(measurement.peakPositionMs ?? 10)
-    setEditUseMinWindowLengthInput(measurement.useMinWindowLength ?? true)
     setSettingsModalOpen(true)
   }, [])
 
@@ -324,7 +318,6 @@ export function KeytapVisualizer() {
     }
 
     console.log('[設定適用] パラメータ:', {
-      editWaveformLengthInput,
       editPeakIntervalInput,
       editAttackOffsetInput,
       editAttackPeakAlignInput,
@@ -339,11 +332,10 @@ export function KeytapVisualizer() {
     const attackResult = calculateMeasurementAttackWaveform(
       measurement.recordingData,
       measurement.keyDownTimestamps,
+      measurement.keyUpTimestamps,
       editAttackOffsetInput,
       editAttackPeakAlignInput,
-      editWaveformLengthInput,
-      editPeakPositionInput,
-      editUseMinWindowLengthInput
+      editPeakPositionInput
     )
     const newAttackWaveform = attackResult.waveform
     const newAttackWindows = attackResult.windows
@@ -353,11 +345,10 @@ export function KeytapVisualizer() {
     const releaseResult = calculateMeasurementReleaseWaveform(
       measurement.recordingData,
       measurement.keyUpTimestamps,
+      measurement.keyDownTimestamps,
       editReleaseOffsetInput,
       editReleasePeakAlignInput,
-      editWaveformLengthInput,
-      editPeakPositionInput,
-      editUseMinWindowLengthInput
+      editPeakPositionInput
     )
     const newReleaseWaveform = releaseResult.waveform
     const newReleaseWindows = releaseResult.windows
@@ -386,20 +377,18 @@ export function KeytapVisualizer() {
             attackWindows: newAttackWindows,
             releaseWindows: newReleaseWindows,
             peakIntervalMs: editPeakIntervalInput,
-            waveformLengthMs: editWaveformLengthInput,
             attackOffsetMs: editAttackOffsetInput,
             attackPeakAlign: editAttackPeakAlignInput,
             releaseOffsetMs: editReleaseOffsetInput,
             releasePeakAlign: editReleasePeakAlignInput,
             peakPositionMs: editPeakPositionInput,
-            useMinWindowLength: editUseMinWindowLengthInput,
           } 
         : m
     ))
 
     setSettingsModalOpen(false)
     console.log('[設定適用] 完了')
-  }, [editingMeasurementId, editWaveformLengthInput, editPeakIntervalInput, editAttackOffsetInput, editAttackPeakAlignInput, editReleaseOffsetInput, editReleasePeakAlignInput, editPeakPositionInput, editUseMinWindowLengthInput, measurementHistory, calculateMeasurementAttackWaveform, calculateMeasurementReleaseWaveform, calculateMeasurementCombinedWaveform])
+  }, [editingMeasurementId, editPeakIntervalInput, editAttackOffsetInput, editAttackPeakAlignInput, editReleaseOffsetInput, editReleasePeakAlignInput, editPeakPositionInput, measurementHistory, calculateMeasurementAttackWaveform, calculateMeasurementReleaseWaveform, calculateMeasurementCombinedWaveform])
 
   // 測定結果を削除
   const handleDeleteMeasurement = useCallback((id: number) => {
@@ -443,11 +432,9 @@ export function KeytapVisualizer() {
         keyTapCount: measurement.keyTapCount,
         keyUpCount: measurement.keyUpCount,
         peakIntervalMs: measurement.peakIntervalMs,
-        useMinWindowLength: measurement.useMinWindowLength,
       },
       audio: {
         sampleRate: SAMPLE_RATE,
-        waveformLengthMs: measurement.waveformLengthMs,
         peakPositionMs: measurement.peakPositionMs,
         recordingDurationMs: measurement.recordingDurationMs,
       },
@@ -498,7 +485,7 @@ export function KeytapVisualizer() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }, [waveformLengthMs])
+  }, [])
 
   // 測定データをtarファイルからインポート
   const handleImportMeasurement = useCallback(async (file: File) => {
@@ -539,14 +526,12 @@ export function KeytapVisualizer() {
       }
       
       // 設定値を取得（メタデータから、なければデフォルト値）
-      const waveformLengthMs = metadata.audio.waveformLengthMs || 70
       const peakPositionMs = metadata.audio.peakPositionMs || 10
       const peakIntervalMs = metadata.measurement.peakIntervalMs || 12
       const attackOffsetMs = 10
       const attackPeakAlign = true
       const releaseOffsetMs = 10
       const releasePeakAlign = true
-      const useMinWindowLength = metadata.measurement.useMinWindowLength ?? true
       
       // 録音データとタイムスタンプから波形を再計算
       let attackWaveform: Float32Array | null = null
@@ -560,11 +545,10 @@ export function KeytapVisualizer() {
         const attackResult = calculateMeasurementAttackWaveform(
           recordingData,
           keyDownTimestamps,
+          keyUpTimestamps,
           attackOffsetMs,
           attackPeakAlign,
-          waveformLengthMs,
-          peakPositionMs,
-          useMinWindowLength
+          peakPositionMs
         )
         attackWaveform = attackResult.waveform
         attackWindows = attackResult.windows
@@ -574,11 +558,10 @@ export function KeytapVisualizer() {
           const releaseResult = calculateMeasurementReleaseWaveform(
             recordingData,
             keyUpTimestamps,
+            keyDownTimestamps,
             releaseOffsetMs,
             releasePeakAlign,
-            waveformLengthMs,
-            peakPositionMs,
-            useMinWindowLength
+            peakPositionMs
           )
           releaseWaveform = releaseResult.waveform
           releaseWindows = releaseResult.windows
@@ -611,13 +594,11 @@ export function KeytapVisualizer() {
         keyUpTimestamps,
         peakIntervalMs,
         recordingDurationMs: metadata.audio.recordingDurationMs || 4000,
-        waveformLengthMs,
         attackOffsetMs,
         attackPeakAlign,
         releaseOffsetMs,
         releasePeakAlign,
         peakPositionMs,
-        useMinWindowLength,
       }
       
       setMeasurementHistory(prev => [...prev, newMeasurement])
@@ -684,6 +665,12 @@ export function KeytapVisualizer() {
             onClick={() => setActiveTab('analysis')}
           >
             📊 解析
+          </button>
+          <button
+            className={`${styles.tab} ${activeTab === 'compare' ? styles.tabActive : ''}`}
+            onClick={() => setActiveTab('compare')}
+          >
+            🔍 比較
           </button>
         </div>
 
@@ -963,6 +950,22 @@ export function KeytapVisualizer() {
           </div>
         )}
 
+        {/* 比較タブ */}
+        {activeTab === 'compare' && (
+          <div className={styles.tabPanel}>
+            <CompareView 
+              measurements={measurementHistory.map(m => ({
+                id: m.id,
+                name: m.name,
+                combinedWaveform: m.combinedWaveform,
+                attackWaveform: m.attackWaveform,
+                releaseWaveform: m.releaseWaveform,
+                recordingData: m.recordingData,
+              }))}
+            />
+          </div>
+        )}
+
       </div>
 
       {/* 測定データ設定モーダル */}
@@ -982,33 +985,6 @@ export function KeytapVisualizer() {
               {/* 波形長設定 */}
               <div className={styles.modalSettingsGroup}>
                 <h4>出力波形設定</h4>
-                <div className={styles.settingsRow}>
-                  <label htmlFor="editUseMinWindowLengthInput">
-                    <input
-                      id="editUseMinWindowLengthInput"
-                      type="checkbox"
-                      checked={editUseMinWindowLengthInput}
-                      onChange={(e) => setEditUseMinWindowLengthInput(e.target.checked)}
-                    />
-                    最小ウィンドウ長を使用
-                  </label>
-                  <span className={styles.settingsHint}>(チェック時は波形長設定を無視)</span>
-                </div>
-                <div className={styles.settingsRow}>
-                  <label htmlFor="editWaveformLengthInput">波形長:</label>
-                  <input
-                    id="editWaveformLengthInput"
-                    type="number"
-                    min={10}
-                    max={500}
-                    step={10}
-                    value={editWaveformLengthInput}
-                    onChange={(e) => setEditWaveformLengthInput(parseInt(e.target.value, 10) || 100)}
-                    className={styles.settingsInput}
-                    disabled={editUseMinWindowLengthInput}
-                  />
-                  <span className={styles.settingsHint}>ms</span>
-                </div>
                 <div className={styles.settingsRow}>
                   <label htmlFor="editPeakPositionInput">ピーク位置:</label>
                   <input

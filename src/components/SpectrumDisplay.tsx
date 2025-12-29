@@ -187,12 +187,13 @@ export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumD
     }
 
     // dB変換してmin/max取得
-    const dbValues: number[] = []
+    let maxDBValue = -Infinity
     for (let i = 0; i < maxBin; i++) {
-      dbValues.push(toDB(powerSpectrum[i]))
+      const db = toDB(powerSpectrum[i])
+      if (db > maxDBValue) maxDBValue = db
     }
     const minDB = -100
-    const maxDB = Math.max(...dbValues, -20)
+    const maxDB = Math.max(maxDBValue, -20)
 
     // グリッド描画
     ctx.strokeStyle = '#333'
@@ -241,7 +242,7 @@ export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumD
       if (freqScale === 'log' && freq < minFreq) continue
       
       const x = freqToX(freq)
-      const db = dbValues[i]
+      const db = toDB(powerSpectrum[i])
       const y = margin.top + plotHeight - ((db - minDB) / (maxDB - minDB)) * plotHeight
 
       if (isFirstPoint) {
