@@ -40,7 +40,6 @@ export interface AudioFeatures {
   perceptualSharpness: number | null
   // Additional features
   loudness: { total: number; specific: Float32Array } | null
-  mfcc: number[] | null
   chroma: number[] | null
 }
 
@@ -170,7 +169,6 @@ export function useAudioFeatures(waveformData: Float32Array | null, sampleRate =
       perceptualSpread: null,
       perceptualSharpness: null,
       loudness: null,
-      mfcc: null,
       chroma: null,
     }
 
@@ -207,11 +205,10 @@ export function useAudioFeatures(waveformData: Float32Array | null, sampleRate =
       Meyda.sampleRate = sampleRate
       Meyda.bufferSize = bufferSize
       Meyda.windowingFunction = 'hanning'
-      Meyda.numberOfMFCCCoefficients = 13
 
       // 特徴量を抽出
       const features = Meyda.extract(
-        [...FEATURE_LIST, 'loudness', 'mfcc', 'chroma'],
+        [...FEATURE_LIST, 'loudness', 'chroma'],
         adjustedData
       )
 
@@ -262,7 +259,6 @@ export function useAudioFeatures(waveformData: Float32Array | null, sampleRate =
         perceptualSpread: typeof features.perceptualSpread === 'number' ? features.perceptualSpread : null,
         perceptualSharpness: typeof features.perceptualSharpness === 'number' ? features.perceptualSharpness : null,
         loudness: features.loudness as { total: number; specific: Float32Array } | null,
-        mfcc: features.mfcc as number[] | null,
         chroma: features.chroma as number[] | null,
       }
     } catch (error) {

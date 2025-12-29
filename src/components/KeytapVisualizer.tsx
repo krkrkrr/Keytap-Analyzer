@@ -1,12 +1,12 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAudioRecorder } from '../hooks/useAudioRecorder'
-import { WaveformCanvas } from './WaveformCanvas'
 import { AveragedWaveform } from './AveragedWaveform'
 import { AudioFeaturesDisplay } from './AudioFeaturesDisplay'
 import { SpectrumDisplay } from './SpectrumDisplay'
 import { StatusMessage } from './StatusMessage'
 import { RecordButton } from './RecordButton'
 import { WindowsDebugView } from './WindowsDebugView'
+import { CollapsibleSection } from './CollapsibleSection'
 import { 
   encodeWav, 
   createPaxTar, 
@@ -52,6 +52,7 @@ interface MeasurementResult {
   releaseOffsetMs: number      // リリース音オフセット (ms)
   releasePeakAlign: boolean    // リリース音ピーク同期
   peakPositionMs: number       // ピーク位置オフセット (ms)
+  useMinWindowLength: boolean  // 最小ウィンドウ長を使用
   // デバッグ用ウィンドウデータ
   attackWindows: WindowInfo[]  // アタック音の個別ウィンドウ
   releaseWindows: WindowInfo[] // リリース音の個別ウィンドウ
@@ -75,6 +76,7 @@ export function KeytapVisualizer() {
   const [editReleaseOffsetInput, setEditReleaseOffsetInput] = useState(10)
   const [editReleasePeakAlignInput, setEditReleasePeakAlignInput] = useState(true)
   const [editPeakPositionInput, setEditPeakPositionInput] = useState(10)
+  const [editUseMinWindowLengthInput, setEditUseMinWindowLengthInput] = useState(true) // 最小ウィンドウ長を使用
   
   const {
     status,
@@ -97,6 +99,7 @@ export function KeytapVisualizer() {
     peakAlignEnabled,
     waveformLengthMs,
     peakPositionMs,
+    sampleRate,
     startRecording,
     initializeAudio,
     setPeakPositionMs,
@@ -144,12 +147,57 @@ export function KeytapVisualizer() {
         releaseOffsetMs,
         releasePeakAlign: true, // デフォルトはtrue
         peakPositionMs,
+        useMinWindowLength: true, // デフォルトで最小ウィンドウ長を使用
       }
       setMeasurementHistory(prev => [...prev, newMeasurement])
       setSelectedMeasurementId(nextMeasurementId)
       setNextMeasurementId(prev => prev + 1)
     }
   }, [status, averagedWaveform, combinedWaveform, releaseWaveform, finalRecordingData, keyTapCount, keyUpCount, keyDownTimestamps, keyUpTimestamps, peakIntervalMs, recordingDuration, waveformLengthMs, windowOffsetMs, peakAlignEnabled, releaseOffsetMs, peakPositionMs, nextMeasurementId])
+
+  // 新規測定追加後、個別ウィンドウ情報を計算して追加
+  useEffect(() => {
+    if (measurementHistory.length > 0) {
+      const latestMeasurement = measurementHistory[measurementHistory.length - 1]
+      
+      // 既にwindowsが計算されている場合はスキップ
+      if (latestMeasurement.attackWindows.length > 0 || latestMeasurement.releaseWindows.length > 0) {
+        return
+      }
+
+      // windowsが空の場合は計算
+      const attackResult = calculateMeasurementAttackWaveform(
+        latestMeasurement.recordingData,
+        latestMeasurement.keyDownTimestamps,
+        latestMeasurement.attackOffsetMs,
+        latestMeasurement.attackPeakAlign,
+        latestMeasurement.waveformLengthMs,
+        latestMeasurement.peakPositionMs,
+        latestMeasurement.useMinWindowLength
+      )
+
+      const releaseResult = calculateMeasurementReleaseWaveform(
+        latestMeasurement.recordingData,
+        latestMeasurement.keyUpTimestamps,
+        latestMeasurement.releaseOffsetMs,
+        latestMeasurement.releasePeakAlign,
+        latestMeasurement.waveformLengthMs,
+        latestMeasurement.peakPositionMs,
+        latestMeasurement.useMinWindowLength
+      )
+
+      // windowsを保存
+      setMeasurementHistory(prev => prev.map((m, idx) =>
+        idx === prev.length - 1
+          ? {
+              ...m,
+              attackWindows: attackResult.windows,
+              releaseWindows: releaseResult.windows,
+            }
+          : m
+      ))
+    }
+  }, [measurementHistory.length])
 
   // 選択中の測定結果を取得
   const selectedMeasurement = measurementHistory.find(m => m.id === selectedMeasurementId) || null
@@ -173,7 +221,8 @@ export function KeytapVisualizer() {
     offsetMs: number,
     peakAlign: boolean,
     targetLengthMs: number,
-    peakPosMs: number
+    peakPosMs: number,
+    useMinWinLength: boolean = false
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyDownTimestamps.length < 3) {
       return { waveform: null, windows: [] }
@@ -188,7 +237,8 @@ export function KeytapVisualizer() {
       peakAlign,
       targetLengthMs,
       peakPositionMs: peakPosMs,
-      sampleRate: SAMPLE_RATE
+      sampleRate: SAMPLE_RATE,
+      useMinWindowLength: useMinWinLength
     })
 
     return { waveform: result.waveform, windows: result.windows }
@@ -201,7 +251,8 @@ export function KeytapVisualizer() {
     offsetMs: number,
     peakAlign: boolean,
     targetLengthMs: number,
-    peakPosMs: number
+    peakPosMs: number,
+    useMinWinLength: boolean = false
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyUpTimestamps.length < 2) {
       return { waveform: null, windows: [] }
@@ -218,7 +269,8 @@ export function KeytapVisualizer() {
       peakAlign,
       targetLengthMs,
       peakPositionMs: peakPosMs,
-      sampleRate: SAMPLE_RATE
+      sampleRate: SAMPLE_RATE,
+      useMinWindowLength: useMinWinLength
     })
 
     return { waveform: result.waveform, windows: result.windows }
@@ -243,6 +295,7 @@ export function KeytapVisualizer() {
     setEditReleaseOffsetInput(measurement.releaseOffsetMs ?? 10)
     setEditReleasePeakAlignInput(measurement.releasePeakAlign ?? true)
     setEditPeakPositionInput(measurement.peakPositionMs ?? 10)
+    setEditUseMinWindowLengthInput(measurement.useMinWindowLength ?? true)
     setSettingsModalOpen(true)
   }, [])
 
@@ -285,7 +338,8 @@ export function KeytapVisualizer() {
       editAttackOffsetInput,
       editAttackPeakAlignInput,
       editWaveformLengthInput,
-      editPeakPositionInput
+      editPeakPositionInput,
+      editUseMinWindowLengthInput
     )
     const newAttackWaveform = attackResult.waveform
     const newAttackWindows = attackResult.windows
@@ -298,7 +352,8 @@ export function KeytapVisualizer() {
       editReleaseOffsetInput,
       editReleasePeakAlignInput,
       editWaveformLengthInput,
-      editPeakPositionInput
+      editPeakPositionInput,
+      editUseMinWindowLengthInput
     )
     const newReleaseWaveform = releaseResult.waveform
     const newReleaseWindows = releaseResult.windows
@@ -333,13 +388,14 @@ export function KeytapVisualizer() {
             releaseOffsetMs: editReleaseOffsetInput,
             releasePeakAlign: editReleasePeakAlignInput,
             peakPositionMs: editPeakPositionInput,
+            useMinWindowLength: editUseMinWindowLengthInput,
           } 
         : m
     ))
 
     setSettingsModalOpen(false)
     console.log('[設定適用] 完了')
-  }, [editingMeasurementId, editWaveformLengthInput, editPeakIntervalInput, editAttackOffsetInput, editAttackPeakAlignInput, editReleaseOffsetInput, editReleasePeakAlignInput, editPeakPositionInput, measurementHistory, calculateMeasurementAttackWaveform, calculateMeasurementReleaseWaveform, calculateMeasurementCombinedWaveform])
+  }, [editingMeasurementId, editWaveformLengthInput, editPeakIntervalInput, editAttackOffsetInput, editAttackPeakAlignInput, editReleaseOffsetInput, editReleasePeakAlignInput, editPeakPositionInput, editUseMinWindowLengthInput, measurementHistory, calculateMeasurementAttackWaveform, calculateMeasurementReleaseWaveform, calculateMeasurementCombinedWaveform])
 
   // 測定結果を削除
   const handleDeleteMeasurement = useCallback((id: number) => {
@@ -383,6 +439,7 @@ export function KeytapVisualizer() {
         keyTapCount: measurement.keyTapCount,
         keyUpCount: measurement.keyUpCount,
         peakIntervalMs: measurement.peakIntervalMs,
+        useMinWindowLength: measurement.useMinWindowLength,
       },
       audio: {
         sampleRate: SAMPLE_RATE,
@@ -485,6 +542,7 @@ export function KeytapVisualizer() {
       const attackPeakAlign = true
       const releaseOffsetMs = 10
       const releasePeakAlign = true
+      const useMinWindowLength = metadata.measurement.useMinWindowLength ?? true
       
       // 録音データとタイムスタンプから波形を再計算
       let attackWaveform: Float32Array | null = null
@@ -501,7 +559,8 @@ export function KeytapVisualizer() {
           attackOffsetMs,
           attackPeakAlign,
           waveformLengthMs,
-          peakPositionMs
+          peakPositionMs,
+          useMinWindowLength
         )
         attackWaveform = attackResult.waveform
         attackWindows = attackResult.windows
@@ -514,7 +573,8 @@ export function KeytapVisualizer() {
             releaseOffsetMs,
             releasePeakAlign,
             waveformLengthMs,
-            peakPositionMs
+            peakPositionMs,
+            useMinWindowLength
           )
           releaseWaveform = releaseResult.waveform
           releaseWindows = releaseResult.windows
@@ -553,6 +613,7 @@ export function KeytapVisualizer() {
         releaseOffsetMs,
         releasePeakAlign,
         peakPositionMs,
+        useMinWindowLength,
       }
       
       setMeasurementHistory(prev => [...prev, newMeasurement])
@@ -646,12 +707,6 @@ export function KeytapVisualizer() {
                 </div>
                 <StatusMessage status={status} message={statusMessage} />
               </div>
-
-              <WaveformCanvas 
-                recordingData={recordingData}
-                isRecording={isRecording}
-                progress={recordingProgress}
-              />
               
               {/* 録音設定 */}
               <div className={styles.settingsSection}>
@@ -740,7 +795,7 @@ export function KeytapVisualizer() {
                             e.stopPropagation()
                             handleOpenMeasurementSettings(m)
                           }}
-                          title="測定用音声設定"
+                          title="平均化した打鍵音設定"
                           disabled={!m.recordingData || m.keyDownTimestamps.length < 3}
                         >
                           ⚙️
@@ -775,102 +830,117 @@ export function KeytapVisualizer() {
                   <div className={styles.measurementAnalysis}>
                     <h3>{selectedMeasurement.name}</h3>
                     
-                    {/* 測定用音声（スペクトル・特徴量・波形） */}
+                    {/* 元録音データ（スペクトル・特徴量・波形） */}
+                    {selectedMeasurement.recordingData && (
+                      <CollapsibleSection title={`📊 元録音データ (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}>
+                        <>
+                          <SpectrumDisplay 
+                            waveformData={selectedMeasurement.recordingData} 
+                            title={`元録音データのスペクトル (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
+                          />
+                          <AudioFeaturesDisplay 
+                            waveformData={selectedMeasurement.recordingData} 
+                            title={`元録音データの特徴量 (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
+                          />
+                          <AveragedWaveform 
+                            waveformData={selectedMeasurement.recordingData}
+                            keyTapCount={selectedMeasurement.keyTapCount}
+                            windowOffsetMs={0}
+                            peakAlignEnabled={false}
+                            title={`元録音データ (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
+                            showKeyDownLine={false}
+                            keyDownTimestamps={selectedMeasurement.keyDownTimestamps}
+                            keyUpTimestamps={selectedMeasurement.keyUpTimestamps}
+                            sampleRate={sampleRate}
+                          />
+                        </>
+                      </CollapsibleSection>
+                    )}
+
+                    {/* 平均化した打鍵音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.combinedWaveform && (
-                      <>
-                        <SpectrumDisplay 
-                          waveformData={selectedMeasurement.combinedWaveform} 
-                          title="測定用音声のスペクトル" 
-                        />
-                        <AudioFeaturesDisplay 
-                          waveformData={selectedMeasurement.combinedWaveform} 
-                          title={`測定用音声の特徴量 (間隔: ${selectedMeasurement.peakIntervalMs}ms)`} 
-                        />
-                        <AveragedWaveform 
-                          waveformData={selectedMeasurement.combinedWaveform}
-                          keyTapCount={selectedMeasurement.keyTapCount}
-                          windowOffsetMs={0}
-                          peakAlignEnabled={true}
-                          title={`測定用音声 (アタック→${selectedMeasurement.peakIntervalMs}ms→リリース)`}
-                        />
-                      </>
+                      <CollapsibleSection title={`🎵 平均化した打鍵音 (間隔: ${selectedMeasurement.peakIntervalMs}ms)`} defaultExpanded={true}>
+                        <>
+                          <SpectrumDisplay 
+                            waveformData={selectedMeasurement.combinedWaveform} 
+                            title="平均化した打鍵音のスペクトル" 
+                          />
+                          <AudioFeaturesDisplay 
+                            waveformData={selectedMeasurement.combinedWaveform} 
+                            title={`平均化した打鍵音の特徴量 (間隔: ${selectedMeasurement.peakIntervalMs}ms)`} 
+                          />
+                          <AveragedWaveform 
+                            waveformData={selectedMeasurement.combinedWaveform}
+                            keyTapCount={selectedMeasurement.keyTapCount}
+                            windowOffsetMs={0}
+                            peakAlignEnabled={true}
+                            title={`平均化した打鍵音 (アタック→${selectedMeasurement.peakIntervalMs}ms→リリース)`}
+                            sampleRate={sampleRate}
+                          />
+                        </>
+                      </CollapsibleSection>
                     )}
 
                     {/* アタック音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.attackWaveform && (
-                      <>
-                        <SpectrumDisplay 
-                          waveformData={selectedMeasurement.attackWaveform} 
-                          title="アタック音のスペクトル" 
-                        />
-                        <AudioFeaturesDisplay 
-                          waveformData={selectedMeasurement.attackWaveform} 
-                          title="アタック音の特徴量" 
-                        />
-                        <AveragedWaveform 
-                          waveformData={selectedMeasurement.attackWaveform}
-                          keyTapCount={selectedMeasurement.keyTapCount}
-                          windowOffsetMs={0}
-                          peakAlignEnabled={true}
-                          title="アタック音 (KeyDown → KeyUp)"
-                        />
-                        {selectedMeasurement.attackWindows.length > 0 && (
-                          <WindowsDebugView
-                            windows={selectedMeasurement.attackWindows}
-                            title="アタック音 - 個別ウィンドウ"
-                            sampleRate={SAMPLE_RATE}
+                      <CollapsibleSection title="📈 アタック音" defaultExpanded={false}>
+                        <>
+                          <SpectrumDisplay 
+                            waveformData={selectedMeasurement.attackWaveform} 
+                            title="アタック音のスペクトル" 
                           />
-                        )}
-                      </>
+                          <AudioFeaturesDisplay 
+                            waveformData={selectedMeasurement.attackWaveform} 
+                            title="アタック音の特徴量" 
+                          />
+                          <AveragedWaveform 
+                            waveformData={selectedMeasurement.attackWaveform}
+                            keyTapCount={selectedMeasurement.keyTapCount}
+                            windowOffsetMs={0}
+                            peakAlignEnabled={true}
+                            title="アタック音 (KeyDown → KeyUp)"
+                            sampleRate={sampleRate}
+                          />
+                          {selectedMeasurement.attackWindows.length > 0 && (
+                            <WindowsDebugView
+                              windows={selectedMeasurement.attackWindows}
+                              title="アタック音 - 個別ウィンドウ"
+                              sampleRate={SAMPLE_RATE}
+                            />
+                          )}
+                        </>
+                      </CollapsibleSection>
                     )}
 
                     {/* リリース音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.releaseWaveform && (
-                      <>
-                        <SpectrumDisplay 
-                          waveformData={selectedMeasurement.releaseWaveform} 
-                          title="リリース音のスペクトル" 
-                        />
-                        <AudioFeaturesDisplay 
-                          waveformData={selectedMeasurement.releaseWaveform} 
-                          title="リリース音の特徴量" 
-                        />
-                        <AveragedWaveform 
-                          waveformData={selectedMeasurement.releaseWaveform}
-                          keyTapCount={selectedMeasurement.keyUpCount}
-                          windowOffsetMs={0}
-                          peakAlignEnabled={true}
-                          title="リリース音 (KeyUp → KeyDown)"
-                        />
-                        {selectedMeasurement.releaseWindows.length > 0 && (
-                          <WindowsDebugView
-                            windows={selectedMeasurement.releaseWindows}
-                            title="リリース音 - 個別ウィンドウ"
-                            sampleRate={SAMPLE_RATE}
+                      <CollapsibleSection title="📉 リリース音" defaultExpanded={false}>
+                        <>
+                          <SpectrumDisplay 
+                            waveformData={selectedMeasurement.releaseWaveform} 
+                            title="リリース音のスペクトル" 
                           />
-                        )}
-                      </>
-                    )}
-
-                    {/* 元録音データ（スペクトル・特徴量・波形） */}
-                    {selectedMeasurement.recordingData && (
-                      <>
-                        <SpectrumDisplay 
-                          waveformData={selectedMeasurement.recordingData} 
-                          title={`元録音データのスペクトル (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
-                        />
-                        <AudioFeaturesDisplay 
-                          waveformData={selectedMeasurement.recordingData} 
-                          title={`元録音データの特徴量 (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
-                        />
-                        <AveragedWaveform 
-                          waveformData={selectedMeasurement.recordingData}
-                          keyTapCount={selectedMeasurement.keyTapCount}
-                          windowOffsetMs={0}
-                          peakAlignEnabled={false}
-                          title={`元録音データ (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
-                        />
-                      </>
+                          <AudioFeaturesDisplay 
+                            waveformData={selectedMeasurement.releaseWaveform} 
+                            title="リリース音の特徴量" 
+                          />
+                          <AveragedWaveform 
+                            waveformData={selectedMeasurement.releaseWaveform}
+                            keyTapCount={selectedMeasurement.keyUpCount}
+                            windowOffsetMs={0}
+                            peakAlignEnabled={true}
+                            title="リリース音 (KeyUp → KeyDown)"
+                            sampleRate={sampleRate}
+                          />
+                          {selectedMeasurement.releaseWindows.length > 0 && (
+                            <WindowsDebugView
+                              windows={selectedMeasurement.releaseWindows}
+                              title="リリース音 - 個別ウィンドウ"
+                              sampleRate={SAMPLE_RATE}
+                            />
+                          )}
+                        </>
+                      </CollapsibleSection>
                     )}
                   </div>
                 )}
@@ -896,7 +966,7 @@ export function KeytapVisualizer() {
         <div className={styles.modalOverlay} onClick={() => setSettingsModalOpen(false)}>
           <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
-              <h3>測定用音声設定</h3>
+              <h3>平均化した打鍵音設定</h3>
               <button 
                 className={styles.modalCloseBtn}
                 onClick={() => setSettingsModalOpen(false)}
@@ -909,6 +979,18 @@ export function KeytapVisualizer() {
               <div className={styles.modalSettingsGroup}>
                 <h4>出力波形設定</h4>
                 <div className={styles.settingsRow}>
+                  <label htmlFor="editUseMinWindowLengthInput">
+                    <input
+                      id="editUseMinWindowLengthInput"
+                      type="checkbox"
+                      checked={editUseMinWindowLengthInput}
+                      onChange={(e) => setEditUseMinWindowLengthInput(e.target.checked)}
+                    />
+                    最小ウィンドウ長を使用
+                  </label>
+                  <span className={styles.settingsHint}>(チェック時は波形長設定を無視)</span>
+                </div>
+                <div className={styles.settingsRow}>
                   <label htmlFor="editWaveformLengthInput">波形長:</label>
                   <input
                     id="editWaveformLengthInput"
@@ -919,6 +1001,7 @@ export function KeytapVisualizer() {
                     value={editWaveformLengthInput}
                     onChange={(e) => setEditWaveformLengthInput(parseInt(e.target.value, 10) || 100)}
                     className={styles.settingsInput}
+                    disabled={editUseMinWindowLengthInput}
                   />
                   <span className={styles.settingsHint}>ms</span>
                 </div>

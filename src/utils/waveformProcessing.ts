@@ -45,6 +45,7 @@ export interface SyncAverageParams {
   targetLengthMs: number
   peakPositionMs: number
   sampleRate: number
+  useMinWindowLength?: boolean  // trueの場合、最小ウィンドウ長に合わせる
 }
 
 /**
@@ -78,7 +79,8 @@ export function calculateSyncAveragedWaveform(params: SyncAverageParams): SyncAv
     peakAlign,
     targetLengthMs,
     peakPositionMs,
-    sampleRate
+    sampleRate,
+    useMinWindowLength = false
   } = params
 
   if (timestamps.length === 0) {
@@ -111,11 +113,19 @@ export function calculateSyncAveragedWaveform(params: SyncAverageParams): SyncAv
     return { waveform: null, windowCount: 0, windows: [] }
   }
 
+  // 最小ウィンドウ長を使用する場合は、全ウィンドウの最小長を計算
+  let effectiveOutputSize = targetLengthSamples
+  if (useMinWindowLength) {
+    const minWindowLength = Math.min(...windowInfos.map(w => w.data.length))
+    effectiveOutputSize = Math.min(minWindowLength, targetLengthSamples)
+    console.log(`[最小ウィンドウ長] 使用: ${effectiveOutputSize}サンプル (${(effectiveOutputSize / sampleRate * 1000).toFixed(1)}ms)`)
+  }
+
   if (peakAlign) {
     // ピーク同期モード
     // ピーク位置を peakPositionMs の位置に配置
     const peakPositionInOutput = Math.floor((peakPositionMs / 1000) * sampleRate)
-    const outputWindowSize = targetLengthSamples
+    const outputWindowSize = effectiveOutputSize
     const summedWaveform = new Float32Array(outputWindowSize)
     
     // ピーク位置を揃えて同期加算
@@ -137,7 +147,7 @@ export function calculateSyncAveragedWaveform(params: SyncAverageParams): SyncAv
     return { waveform: summedWaveform, windowCount: windowInfos.length, windows: windowInfos }
   } else {
     // 従来の同期加算モード（キーイベント基準）
-    const outputWindowSize = targetLengthSamples
+    const outputWindowSize = effectiveOutputSize
     const summedWaveform = new Float32Array(outputWindowSize)
 
     for (const window of windowInfos) {

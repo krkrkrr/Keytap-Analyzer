@@ -230,6 +230,7 @@ export interface MeasurementMetadata {
     keyTapCount: number
     keyUpCount: number
     peakIntervalMs: number
+    useMinWindowLength?: boolean
   }
   audio: {
     sampleRate: number

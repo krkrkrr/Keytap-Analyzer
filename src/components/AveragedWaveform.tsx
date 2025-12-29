@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import styles from './WaveformCanvas.module.css'
 
-const SAMPLE_RATE = 48000
+const DEFAULT_SAMPLE_RATE = 48000
 const MARGIN = { top: 30, right: 20, bottom: 40, left: 50 }
 
 type ScaleType = 'linear' | 'dB'
@@ -12,6 +12,10 @@ interface AveragedWaveformProps {
   windowOffsetMs?: number
   peakAlignEnabled?: boolean
   title?: string
+  showKeyDownLine?: boolean
+  keyDownTimestamps?: number[]
+  keyUpTimestamps?: number[]
+  sampleRate?: number
 }
 
 // リニア値をdBに変換（0を避けるため最小値を設定）
@@ -22,12 +26,17 @@ function linearToDb(value: number, minDb: number = -60): number {
   return Math.max(db, minDb)
 }
 
-export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5, peakAlignEnabled = false, title = '同期加算平均波形' }: AveragedWaveformProps) {
+export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5, peakAlignEnabled = false, title = '同期加算平均波形', showKeyDownLine = true, keyDownTimestamps = [], keyUpTimestamps = [], sampleRate = DEFAULT_SAMPLE_RATE }: AveragedWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [scaleType, setScaleType] = useState<ScaleType>('linear')
+  
+  // 横軸ズーム用の状態
+  const [zoomStartMs, setZoomStartMs] = useState<number>(0)
+  const [zoomEndMs, setZoomEndMs] = useState<number | null>(null) // nullの場合は全体表示
+  const [isZoomed, setIsZoomed] = useState(false)
 
   const drawEmptyCanvas = useCallback((canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) => {
     ctx.fillStyle = '#f0f8ff'
@@ -61,11 +70,22 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     data: Float32Array, 
     offsetMs: number, 
     isPeakAligned: boolean,
-    scale: ScaleType
+    scale: ScaleType,
+    viewStartMs: number = 0,
+    viewEndMs: number | null = null
   ) => {
     const plotWidth = canvas.width - MARGIN.left - MARGIN.right
     const plotHeight = canvas.height - MARGIN.top - MARGIN.bottom
-    const durationMs = (data.length / SAMPLE_RATE) * 1000
+    const totalDurationMs = (data.length / sampleRate) * 1000
+    
+    // ズーム範囲を計算
+    const startMs = Math.max(0, viewStartMs)
+    const endMs = viewEndMs !== null ? Math.min(viewEndMs, totalDurationMs) : totalDurationMs
+    const viewDurationMs = endMs - startMs
+    
+    // サンプルインデックスの範囲
+    const startSample = Math.floor((startMs / 1000) * sampleRate)
+    const endSample = Math.ceil((endMs / 1000) * sampleRate)
 
     // キャンバスをクリア
     ctx.fillStyle = '#f0f8ff'
@@ -80,9 +100,9 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     ctx.lineWidth = 1
 
     // 横軸グリッド（時間）
-    const timeStep = getTimeStep(durationMs)
-    for (let t = 0; t <= durationMs; t += timeStep) {
-      const x = MARGIN.left + (t / durationMs) * plotWidth
+    const timeStep = getTimeStep(viewDurationMs)
+    for (let t = Math.ceil(startMs / timeStep) * timeStep; t <= endMs; t += timeStep) {
+      const x = MARGIN.left + ((t - startMs) / viewDurationMs) * plotWidth
       ctx.beginPath()
       ctx.moveTo(x, MARGIN.top)
       ctx.lineTo(x, MARGIN.top + plotHeight)
@@ -133,8 +153,8 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
 
     // 横軸ラベル（時間）
     ctx.textAlign = 'center'
-    for (let t = 0; t <= durationMs; t += timeStep) {
-      const x = MARGIN.left + (t / durationMs) * plotWidth
+    for (let t = Math.ceil(startMs / timeStep) * timeStep; t <= endMs; t += timeStep) {
+      const x = MARGIN.left + ((t - startMs) / viewDurationMs) * plotWidth
       ctx.fillText(`${t.toFixed(0)}`, x, canvas.height - 10)
     }
     ctx.fillText('Time (ms)', MARGIN.left + plotWidth / 2, canvas.height - 2)
@@ -184,38 +204,87 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
           peakIndex = i
         }
       }
-      const peakX = MARGIN.left + (peakIndex / data.length) * plotWidth
+      const peakTimeMs = (peakIndex / sampleRate) * 1000
       
-      ctx.strokeStyle = '#ff6b6b'
-      ctx.lineWidth = 2
-      ctx.setLineDash([5, 5])
-      ctx.beginPath()
-      ctx.moveTo(peakX, MARGIN.top)
-      ctx.lineTo(peakX, MARGIN.top + plotHeight)
-      ctx.stroke()
-      ctx.setLineDash([])
+      // ピークが表示範囲内にある場合のみ描画
+      if (peakTimeMs >= startMs && peakTimeMs <= endMs) {
+        const peakX = MARGIN.left + ((peakTimeMs - startMs) / viewDurationMs) * plotWidth
+        
+        ctx.strokeStyle = '#ff6b6b'
+        ctx.lineWidth = 2
+        ctx.setLineDash([5, 5])
+        ctx.beginPath()
+        ctx.moveTo(peakX, MARGIN.top)
+        ctx.lineTo(peakX, MARGIN.top + plotHeight)
+        ctx.stroke()
+        ctx.setLineDash([])
 
-      ctx.fillStyle = '#ff6b6b'
-      ctx.font = '12px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText('Peak', peakX, MARGIN.top - 5)
+        ctx.fillStyle = '#ff6b6b'
+        ctx.font = '12px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('Peak', peakX, MARGIN.top - 5)
+      }
     } else {
-      const windowOffsetSamples = Math.floor((offsetMs / 1000) * SAMPLE_RATE)
-      const triggerX = MARGIN.left + (windowOffsetSamples / data.length) * plotWidth
-      
-      ctx.strokeStyle = '#ff6b6b'
-      ctx.lineWidth = 2
-      ctx.setLineDash([5, 5])
-      ctx.beginPath()
-      ctx.moveTo(triggerX, MARGIN.top)
-      ctx.lineTo(triggerX, MARGIN.top + plotHeight)
-      ctx.stroke()
-      ctx.setLineDash([])
+      if (showKeyDownLine) {
+        const keyDownTimeMs = offsetMs
+        
+        // キーダウンが表示範囲内にある場合のみ描画
+        if (keyDownTimeMs >= startMs && keyDownTimeMs <= endMs) {
+          const triggerX = MARGIN.left + ((keyDownTimeMs - startMs) / viewDurationMs) * plotWidth
+          
+          ctx.strokeStyle = '#ff6b6b'
+          ctx.lineWidth = 2
+          ctx.setLineDash([5, 5])
+          ctx.beginPath()
+          ctx.moveTo(triggerX, MARGIN.top)
+          ctx.lineTo(triggerX, MARGIN.top + plotHeight)
+          ctx.stroke()
+          ctx.setLineDash([])
 
-      ctx.fillStyle = '#ff6b6b'
-      ctx.font = '12px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText(`KeyDown`, triggerX, MARGIN.top - 5)
+          ctx.fillStyle = '#ff6b6b'
+          ctx.font = '12px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(`KeyDown`, triggerX, MARGIN.top - 5)
+        }
+      }
+    }
+
+    // キーイベントのタイムスタンプを描画（元録音データ用）
+    
+    // KeyDownタイムスタンプを描画（青色）
+    if (keyDownTimestamps.length > 0) {
+      ctx.strokeStyle = '#2196F3'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      
+      keyDownTimestamps.forEach((timestamp, _index) => {
+        if (timestamp >= startMs && timestamp <= endMs) {
+          const x = MARGIN.left + ((timestamp - startMs) / viewDurationMs) * plotWidth
+          ctx.beginPath()
+          ctx.moveTo(x, MARGIN.top)
+          ctx.lineTo(x, MARGIN.top + plotHeight)
+          ctx.stroke()
+        }
+      })
+      ctx.setLineDash([])
+    }
+
+    // KeyUpタイムスタンプを描画（オレンジ色）
+    if (keyUpTimestamps.length > 0) {
+      ctx.strokeStyle = '#FF9800'
+      ctx.lineWidth = 1
+      ctx.setLineDash([2, 2])
+      
+      keyUpTimestamps.forEach((timestamp, _index) => {
+        if (timestamp >= startMs && timestamp <= endMs) {
+          const x = MARGIN.left + ((timestamp - startMs) / viewDurationMs) * plotWidth
+          ctx.beginPath()
+          ctx.moveTo(x, MARGIN.top)
+          ctx.lineTo(x, MARGIN.top + plotHeight)
+          ctx.stroke()
+        }
+      })
+      ctx.setLineDash([])
     }
 
     // 波形を描画
@@ -223,16 +292,22 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     ctx.lineWidth = 1.5
     ctx.beginPath()
 
-    // 最大振幅を計算（スプレッド演算子を使わずループで計算）
+    // 最大振幅を計算（表示範囲のみ）
     let maxAmplitude = 0
-    for (let i = 0; i < data.length; i++) {
+    for (let i = startSample; i < Math.min(endSample, data.length); i++) {
       const absValue = Math.abs(data[i])
       if (absValue > maxAmplitude) maxAmplitude = absValue
     }
     const minDb = -60
 
-    for (let i = 0; i < data.length; i++) {
-      const x = MARGIN.left + (i / data.length) * plotWidth
+    // 表示範囲のサンプルのみ描画
+    const drawStartSample = Math.max(0, startSample)
+    const drawEndSample = Math.min(data.length, endSample)
+    let isFirst = true
+    
+    for (let i = drawStartSample; i < drawEndSample; i++) {
+      const sampleTimeMs = (i / sampleRate) * 1000
+      const x = MARGIN.left + ((sampleTimeMs - startMs) / viewDurationMs) * plotWidth
       let y: number
 
       if (scale === 'linear') {
@@ -253,8 +328,9 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
         }
       }
 
-      if (i === 0) {
+      if (isFirst) {
         ctx.moveTo(x, y)
+        isFirst = false
       } else {
         ctx.lineTo(x, y)
       }
@@ -266,7 +342,14 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     ctx.font = '12px sans-serif'
     ctx.textAlign = 'right'
     ctx.fillText(`同期加算: ${keyTapCount}回`, canvas.width - MARGIN.right, MARGIN.top - 5)
-  }, [keyTapCount])
+    
+    // ズーム情報を表示
+    if (viewStartMs > 0 || viewEndMs !== null) {
+      ctx.fillStyle = '#666'
+      ctx.textAlign = 'left'
+      ctx.fillText(`表示範囲: ${startMs.toFixed(0)}-${endMs.toFixed(0)}ms`, MARGIN.left, MARGIN.top - 5)
+    }
+  }, [keyTapCount, showKeyDownLine, keyDownTimestamps, keyUpTimestamps, sampleRate])
 
   // 時間軸の目盛り間隔を計算
   function getTimeStep(durationMs: number): number {
@@ -301,7 +384,7 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     }
 
     // AudioBufferを作成
-    const audioBuffer = audioContext.createBuffer(1, waveformData.length, SAMPLE_RATE)
+    const audioBuffer = audioContext.createBuffer(1, waveformData.length, sampleRate)
     const channelData = audioBuffer.getChannelData(0)
     
     // 波形データをコピー（音量を調整）
@@ -362,11 +445,11 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
     canvas.height = canvas.offsetHeight
 
     if (waveformData && waveformData.length > 0) {
-      drawWaveform(canvas, ctx, waveformData, windowOffsetMs, peakAlignEnabled, scaleType)
+      drawWaveform(canvas, ctx, waveformData, windowOffsetMs, peakAlignEnabled, scaleType, zoomStartMs, isZoomed ? zoomEndMs : null)
     } else {
       drawEmptyCanvas(canvas, ctx)
     }
-  }, [waveformData, windowOffsetMs, peakAlignEnabled, scaleType, drawEmptyCanvas, drawWaveform])
+  }, [waveformData, windowOffsetMs, peakAlignEnabled, scaleType, zoomStartMs, zoomEndMs, isZoomed, drawEmptyCanvas, drawWaveform])
 
   useEffect(() => {
     setupCanvas()
@@ -382,6 +465,23 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
       window.removeEventListener('resize', handleResize)
     }
   }, [setupCanvas])
+
+  // 波形の全体時間
+  const totalDurationMs = waveformData ? (waveformData.length / sampleRate) * 1000 : 0
+
+  // ズームリセット
+  const resetZoom = useCallback(() => {
+    setZoomStartMs(0)
+    setZoomEndMs(null)
+    setIsZoomed(false)
+  }, [])
+
+  // ズーム適用
+  const applyZoom = useCallback(() => {
+    if (zoomEndMs !== null && zoomEndMs > zoomStartMs) {
+      setIsZoomed(true)
+    }
+  }, [zoomStartMs, zoomEndMs])
 
   return (
     <div className={styles.canvasContainer}>
@@ -414,6 +514,52 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
           )}
         </div>
       </div>
+      
+      {/* ズームコントロール */}
+      {waveformData && waveformData.length > 0 && (
+        <div className={styles.zoomControls}>
+          <span className={styles.zoomLabel}>横軸ズーム:</span>
+          <input
+            type="number"
+            value={zoomStartMs}
+            onChange={(e) => setZoomStartMs(Math.max(0, Number(e.target.value)))}
+            min={0}
+            max={totalDurationMs}
+            step={1}
+            className={styles.zoomInput}
+            title="開始時間 (ms)"
+          />
+          <span>-</span>
+          <input
+            type="number"
+            value={zoomEndMs ?? totalDurationMs}
+            onChange={(e) => setZoomEndMs(Math.min(totalDurationMs, Number(e.target.value)))}
+            min={0}
+            max={totalDurationMs}
+            step={1}
+            className={styles.zoomInput}
+            title="終了時間 (ms)"
+          />
+          <span>ms</span>
+          <button
+            onClick={applyZoom}
+            className={styles.zoomButton}
+            title="ズーム適用"
+          >
+            🔍 適用
+          </button>
+          {isZoomed && (
+            <button
+              onClick={resetZoom}
+              className={styles.zoomButton}
+              title="全体表示に戻す"
+            >
+              ↩️ リセット
+            </button>
+          )}
+        </div>
+      )}
+      
       <canvas ref={canvasRef} className={styles.waveformCanvas} />
     </div>
   )

@@ -29,7 +29,7 @@ export interface UseAudioRecorderReturn {
   keyUpTimestamps: number[] // キーアップのタイムスタンプ (ms)
   averagedWaveform: Float32Array | null // アタック音の同期加算平均波形
   releaseWaveform: Float32Array | null // リリース音の同期加算平均波形
-  combinedWaveform: Float32Array | null // 合成された測定用音声
+  combinedWaveform: Float32Array | null // 合成された平均化した打鍵音
   windowOffsetMs: number // ウィンドウオフセット (ms)
   releaseOffsetMs: number // リリース音のウィンドウオフセット (ms)
   peakIntervalMs: number // アタック音ピークからリリース音ピークまでの間隔 (ms)
@@ -63,12 +63,14 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   const [peakAlignEnabled, setPeakAlignEnabled] = useState(false)
   const [waveformLengthMs, setWaveformLengthMs] = useState(DEFAULT_WAVEFORM_LENGTH_MS)
   const [peakPositionMs, setPeakPositionMs] = useState(DEFAULT_PEAK_POSITION_MS)
+  const [actualSampleRate, setActualSampleRate] = useState(SAMPLE_RATE) // 実際のサンプルレート
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioInputRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const recordingStartTimeRef = useRef<number>(0)
+  const audioContextStartTimeRef = useRef<number>(0) // 録音開始時のAudioContext.currentTime (秒)
   const keyTimestampsRef = useRef<number[]>([])
   const keyUpTimestampsRef = useRef<number[]>([])
   const finalRecordingDataRef = useRef<Float32Array | null>(null)
@@ -125,6 +127,11 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     }
 
     const audioContext = audioContextRef.current
+    
+    // 実際のサンプルレートを取得して保存
+    const realSampleRate = audioContext.sampleRate
+    setActualSampleRate(realSampleRate)
+    console.log(`AudioContext サンプルレート: ${realSampleRate}Hz`)
 
     // AudioContextを再開（ユーザージェスチャーが必要な場合）
     if (audioContext.state === 'suspended') {
@@ -156,21 +163,45 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return combined
     }
 
+    // 録音されたサンプル数をトラッキング
+    let totalSamplesRecorded = 0
+    let isFirstChunk = true
+    let updateCounter = 0
+
     // 音声データを収集
     scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
       const inputBuffer = audioProcessingEvent.inputBuffer
       const inputData = inputBuffer.getChannelData(0)
+      
+      // 最初のチャンクが来た時点で、録音開始時刻を調整
+      // この時点でbufferSize分のデータが既に含まれているため、
+      // 録音開始時刻 = 現在のAudioContext.currentTime - bufferSize/sampleRate
+      if (isFirstChunk) {
+        const bufferDurationSec = bufferSize / realSampleRate
+        audioContextStartTimeRef.current = audioContext.currentTime - bufferDurationSec
+        console.log(`最初のオーディオチャンク受信: AudioContext.currentTime=${audioContext.currentTime.toFixed(3)}s, バッファ補正=${bufferDurationSec.toFixed(3)}s, 録音開始時刻=${audioContextStartTimeRef.current.toFixed(3)}s`)
+        isFirstChunk = false
+      }
+      
       // データをコピー
       recordingChunks.push(new Float32Array(inputData))
+      totalSamplesRecorded += inputData.length
 
-      // リアルタイムで波形を更新
-      setRecordingData(combineChunks(recordingChunks))
+      // リアルタイム波形表示は無効化（処理負荷軽減のため）
+      // updateCounter++
+      // if (updateCounter % 5 === 0) {
+      //   setRecordingData(combineChunks(recordingChunks))
+      // }
     }
 
     // オーディオグラフを接続
     audioInputRef.current.connect(analyserRef.current)
     analyserRef.current.connect(scriptProcessor)
     scriptProcessor.connect(audioContext.destination)
+    
+    // 初期値として接続時点のAudioContext.currentTimeを記録（最初のチャンクで補正される）
+    audioContextStartTimeRef.current = audioContext.currentTime
+    console.log(`オーディオグラフ接続: AudioContext.currentTime = ${audioContextStartTimeRef.current.toFixed(3)}秒`)
 
     // 指定時間後に録音を停止
     setTimeout(() => {
@@ -396,13 +427,17 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   useEffect(() => {
     const handleKeyDown = (_event: KeyboardEvent) => {
       if (!isRecording) return
+      if (!audioContextRef.current) return
       
-      // 録音開始からの経過時間を記録
-      const elapsed = Date.now() - recordingStartTimeRef.current
-      keyTimestampsRef.current.push(elapsed)
+      // AudioContext.currentTimeを使ってオーディオタイムラインと同期したタイムスタンプを取得
+      const currentAudioTime = audioContextRef.current.currentTime
+      const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
+      const elapsedMs = elapsedSeconds * 1000
+      
+      keyTimestampsRef.current.push(elapsedMs)
       setKeyTapCount(keyTimestampsRef.current.length)
       
-      console.log(`KeyDown detected at ${elapsed}ms`)
+      console.log(`KeyDown detected at ${elapsedMs.toFixed(1)}ms (AudioContext.currentTime=${currentAudioTime.toFixed(3)}s)`)
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -415,13 +450,17 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   useEffect(() => {
     const handleKeyUp = (_event: KeyboardEvent) => {
       if (!isRecording) return
+      if (!audioContextRef.current) return
       
-      // 録音開始からの経過時間を記録
-      const elapsed = Date.now() - recordingStartTimeRef.current
-      keyUpTimestampsRef.current.push(elapsed)
+      // AudioContext.currentTimeを使ってオーディオタイムラインと同期したタイムスタンプを取得
+      const currentAudioTime = audioContextRef.current.currentTime
+      const elapsedSeconds = currentAudioTime - audioContextStartTimeRef.current
+      const elapsedMs = elapsedSeconds * 1000
+      
+      keyUpTimestampsRef.current.push(elapsedMs)
       setKeyUpCount(keyUpTimestampsRef.current.length)
       
-      console.log(`KeyUp detected at ${elapsed}ms`)
+      console.log(`KeyUp detected at ${elapsedMs.toFixed(1)}ms (AudioContext.currentTime=${currentAudioTime.toFixed(3)}s)`)
     }
 
     window.addEventListener('keyup', handleKeyUp)
@@ -451,6 +490,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     peakAlignEnabled,
     waveformLengthMs,
     peakPositionMs,
+    sampleRate: actualSampleRate,
     startRecording,
     initializeAudio,
     recalculateAveragedWaveform,
