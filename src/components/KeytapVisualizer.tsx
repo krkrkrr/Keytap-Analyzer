@@ -26,7 +26,7 @@ import {
 } from '../utils/waveformProcessing'
 import styles from './KeytapVisualizer.module.css'
 
-const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
+const DEFAULT_RECORDING_DURATION = 10000 // デフォルト10秒
 const MIN_RECORDING_DURATION = 1000 // 最小1秒
 const MAX_RECORDING_DURATION = 30000 // 最大30秒
 
@@ -766,6 +766,8 @@ export function KeytapVisualizer() {
             <div className={styles.newMeasurementPanel}>
               <h3>新規測定</h3>
               <p>キーボードを打鍵して音を録音します</p>
+												<p>キーを押して離す間隔を含め、ゆっくり打鍵してください</p>
+												<p>うまく測定できないときは、サンプルデータの録音データを確認してみてください</p>
               
               {/* 録音ボタンとステータス */}
               <div className={styles.recordingSection}>
@@ -894,7 +896,7 @@ export function KeytapVisualizer() {
                             e.stopPropagation()
                             handleExportMeasurement(m)
                           }}
-                          title="tarファイルとしてエクスポート"
+                          title="datファイルとしてエクスポート"
                         >
                           <MdSave />
                         </button>
