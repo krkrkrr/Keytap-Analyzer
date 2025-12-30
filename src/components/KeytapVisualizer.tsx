@@ -26,7 +26,7 @@ import {
 } from '../utils/waveformProcessing'
 import styles from './KeytapVisualizer.module.css'
 
-const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
+const DEFAULT_RECORDING_DURATION = 10000 // デフォルト10秒
 const MIN_RECORDING_DURATION = 1000 // 最小1秒
 const MAX_RECORDING_DURATION = 30000 // 最大30秒
 
