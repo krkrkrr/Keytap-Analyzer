@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import styles from './CollapsibleSection.module.css'
 
 interface CollapsibleSectionProps {
-  title: string
+  title: ReactNode
   defaultExpanded?: boolean
   children: ReactNode
 }

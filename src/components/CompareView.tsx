@@ -1,4 +1,5 @@
 import { useEffect, useRef, useMemo, useState } from 'react'
+import { MdBarChart } from 'react-icons/md'
 import styles from './CompareView.module.css'
 import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 
@@ -557,7 +558,7 @@ export function CompareView({ measurements, onClose, defaultSampleRate = DEFAULT
         <div className={styles.spectrumPanel}>
           {/* FFTスペクトル表示 */}
           <div className={styles.chartSection}>
-            <h4 className={styles.chartTitle}>📊 FFTスペクトル</h4>
+            <h4 className={styles.chartTitle}><MdBarChart style={{ verticalAlign: 'middle', marginRight: 4 }} /> FFTスペクトル</h4>
             <div className={styles.controls}>
               <div className={styles.controlItem}>
                 <label>FFTサイズ:</label>

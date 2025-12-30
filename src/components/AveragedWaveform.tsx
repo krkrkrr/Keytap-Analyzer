@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
+import { MdBarChart, MdPlayArrow, MdStop, MdSearch, MdReplay } from 'react-icons/md'
 import styles from './WaveformCanvas.module.css'
 import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 const MARGIN = { top: 30, right: 20, bottom: 40, left: 50 }
@@ -485,7 +486,7 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
   return (
     <div className={styles.canvasContainer}>
       <div className={styles.canvasHeader}>
-        <h3 style={{ margin: 0, color: '#4CAF50' }}>📊 {title}</h3>
+        <h3 style={{ margin: 0, color: '#4CAF50' }}><MdBarChart style={{ verticalAlign: 'middle', marginRight: 4 }} /> {title}</h3>
         <div className={styles.headerControls}>
           <div className={styles.scaleToggle}>
             <span className={styles.scaleLabel}>縦軸:</span>
@@ -508,7 +509,7 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
               className={styles.playButton}
               title={isPlaying ? '停止' : '再生'}
             >
-              {isPlaying ? '⏹️ 停止' : '▶️ 再生'}
+              {isPlaying ? <><MdStop /> 停止</> : <><MdPlayArrow /> 再生</>}
             </button>
           )}
         </div>
@@ -545,7 +546,7 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
             className={styles.zoomButton}
             title="ズーム適用"
           >
-            🔍 適用
+            <MdSearch /> 適用
           </button>
           {isZoomed && (
             <button
@@ -553,7 +554,7 @@ export function AveragedWaveform({ waveformData, keyTapCount, windowOffsetMs = 5
               className={styles.zoomButton}
               title="全体表示に戻す"
             >
-              ↩️ リセット
+              <MdReplay /> リセット
             </button>
           )}
         </div>
