@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAudioRecorder } from '../hooks/useAudioRecorder'
+import { useAudioContextState } from '../contexts/AudioContextProvider'
 import { AveragedWaveform } from './AveragedWaveform'
 import { AudioFeaturesDisplay } from './AudioFeaturesDisplay'
 import { SpectrumDisplay } from './SpectrumDisplay'
@@ -23,8 +24,6 @@ import {
   type WindowInfo
 } from '../utils/waveformProcessing'
 import styles from './KeytapVisualizer.module.css'
-
-const SAMPLE_RATE = 48000
 
 const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
 const MIN_RECORDING_DURATION = 1000 // 最小1秒
@@ -67,6 +66,9 @@ export function KeytapVisualizer() {
   const [nextMeasurementId, setNextMeasurementId] = useState(1)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
+  // AudioContext のサンプルレートを取得
+  const { sampleRate: browserSampleRate } = useAudioContextState()
+  
   // 設定モーダル用の状態
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
   const [editingMeasurementId, setEditingMeasurementId] = useState<number | null>(null)
@@ -101,7 +103,7 @@ export function KeytapVisualizer() {
     startRecording,
     initializeAudio,
     setPeakPositionMs,
-  } = useAudioRecorder(recordingDuration)
+  } = useAudioRecorder({ recordingDuration, defaultSampleRate: browserSampleRate })
 
   useEffect(() => {
     initializeAudio()
@@ -167,7 +169,7 @@ export function KeytapVisualizer() {
         return
       }
 
-      const measurementSampleRate = latestMeasurement.sampleRate || SAMPLE_RATE
+      const measurementSampleRate = latestMeasurement.sampleRate || browserSampleRate
 
       const attackResult = calculateMeasurementAttackWaveform(
         latestMeasurement.recordingData,
@@ -205,6 +207,9 @@ export function KeytapVisualizer() {
   // 選択中の測定結果を取得
   const selectedMeasurement = measurementHistory.find(m => m.id === selectedMeasurementId) || null
 
+  // 表示に使用するサンプルレート（selectedMeasurementがあればそのsampleRate、なければhookのsampleRate）
+  const displaySampleRate = selectedMeasurement?.sampleRate || sampleRate
+
   // デバッグ: measurementHistory の変更を監視
   useEffect(() => {
     if (selectedMeasurement) {
@@ -225,7 +230,7 @@ export function KeytapVisualizer() {
     offsetMs: number,
     peakAlign: boolean,
     peakPosMs: number,
-    targetSampleRate: number = SAMPLE_RATE
+    targetSampleRate: number = browserSampleRate
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyDownTimestamps.length < 3) {
       return { waveform: null, windows: [] }
@@ -256,7 +261,7 @@ export function KeytapVisualizer() {
     offsetMs: number,
     peakAlign: boolean,
     peakPosMs: number,
-    targetSampleRate: number = SAMPLE_RATE
+    targetSampleRate: number = browserSampleRate
   ): { waveform: Float32Array | null; windows: WindowInfo[] } => {
     if (keyUpTimestamps.length < 2) {
       return { waveform: null, windows: [] }
@@ -289,7 +294,7 @@ export function KeytapVisualizer() {
     attackWaveform: Float32Array,
     releaseWaveform: Float32Array,
     intervalMs: number,
-    targetSampleRate: number = SAMPLE_RATE
+    targetSampleRate: number = browserSampleRate
   ): Float32Array => {
     return calculateCombinedWaveform(attackWaveform, releaseWaveform, intervalMs, targetSampleRate)
   }, [])
@@ -326,7 +331,7 @@ export function KeytapVisualizer() {
       return
     }
 
-    const measurementSampleRate = measurement.sampleRate || SAMPLE_RATE
+    const measurementSampleRate = measurement.sampleRate || browserSampleRate
 
     console.log('[設定適用] パラメータ:', {
       editPeakIntervalInput,
@@ -449,7 +454,7 @@ export function KeytapVisualizer() {
         peakIntervalMs: measurement.peakIntervalMs,
       },
       audio: {
-        sampleRate: SAMPLE_RATE,
+        sampleRate: measurement.sampleRate || browserSampleRate,
         peakPositionMs: measurement.peakPositionMs,
         recordingDurationMs: measurement.recordingDurationMs,
       },
@@ -476,7 +481,7 @@ export function KeytapVisualizer() {
     if (measurement.recordingData) {
       files.push({
         name: 'recording.wav',
-        data: encodeWav(measurement.recordingData, SAMPLE_RATE),
+        data: encodeWav(measurement.recordingData, measurement.sampleRate || browserSampleRate),
       })
     }
     
@@ -484,7 +489,7 @@ export function KeytapVisualizer() {
     if (measurement.combinedWaveform) {
       files.push({
         name: 'combined.wav',
-        data: encodeWav(measurement.combinedWaveform, SAMPLE_RATE),
+        data: encodeWav(measurement.combinedWaveform, measurement.sampleRate || browserSampleRate),
       })
     }
     
@@ -521,7 +526,7 @@ export function KeytapVisualizer() {
       
       // 録音データを読み込み
       let recordingData: Float32Array | null = null
-      let importedSampleRate = metadata.audio.sampleRate || SAMPLE_RATE // メタデータから取得、なければデフォルト
+      let importedSampleRate = metadata.audio.sampleRate || browserSampleRate // メタデータから取得、なければデフォルト
       const recordingFile = files.find(f => f.name === 'recording.wav')
       if (recordingFile) {
         const decoded = decodeWav(recordingFile.data)
@@ -850,10 +855,12 @@ export function KeytapVisualizer() {
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.recordingData} 
                             title={`元録音データのスペクトル (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
+                            sampleRate={displaySampleRate}
                           />
                           <AudioFeaturesDisplay 
                             waveformData={selectedMeasurement.recordingData} 
                             title={`元録音データの特徴量 (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}
+                            sampleRate={displaySampleRate}
                           />
                           <AveragedWaveform 
                             waveformData={selectedMeasurement.recordingData}
@@ -864,7 +871,7 @@ export function KeytapVisualizer() {
                             showKeyDownLine={false}
                             keyDownTimestamps={selectedMeasurement.keyDownTimestamps}
                             keyUpTimestamps={selectedMeasurement.keyUpTimestamps}
-                            sampleRate={sampleRate}
+                            sampleRate={displaySampleRate}
                           />
                         </>
                       </CollapsibleSection>
@@ -877,10 +884,12 @@ export function KeytapVisualizer() {
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.combinedWaveform} 
                             title="平均化した打鍵音のスペクトル" 
+                            sampleRate={displaySampleRate}
                           />
                           <AudioFeaturesDisplay 
                             waveformData={selectedMeasurement.combinedWaveform} 
                             title={`平均化した打鍵音の特徴量 (間隔: ${selectedMeasurement.peakIntervalMs}ms)`} 
+                            sampleRate={displaySampleRate}
                           />
                           <AveragedWaveform 
                             waveformData={selectedMeasurement.combinedWaveform}
@@ -888,7 +897,7 @@ export function KeytapVisualizer() {
                             windowOffsetMs={0}
                             peakAlignEnabled={true}
                             title={`平均化した打鍵音 (アタック→${selectedMeasurement.peakIntervalMs}ms→リリース)`}
-                            sampleRate={sampleRate}
+                            sampleRate={displaySampleRate}
                           />
                         </>
                       </CollapsibleSection>
@@ -901,10 +910,12 @@ export function KeytapVisualizer() {
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.attackWaveform} 
                             title="アタック音のスペクトル" 
+                            sampleRate={displaySampleRate}
                           />
                           <AudioFeaturesDisplay 
                             waveformData={selectedMeasurement.attackWaveform} 
                             title="アタック音の特徴量" 
+                            sampleRate={displaySampleRate}
                           />
                           <AveragedWaveform 
                             waveformData={selectedMeasurement.attackWaveform}
@@ -912,13 +923,13 @@ export function KeytapVisualizer() {
                             windowOffsetMs={0}
                             peakAlignEnabled={true}
                             title="アタック音 (KeyDown → KeyUp)"
-                            sampleRate={sampleRate}
+                            sampleRate={displaySampleRate}
                           />
                           {selectedMeasurement.attackWindows.length > 0 && (
                             <WindowsDebugView
                               windows={selectedMeasurement.attackWindows}
                               title="アタック音 - 個別ウィンドウ"
-                              sampleRate={sampleRate}
+                              sampleRate={displaySampleRate}
                             />
                           )}
                         </>
@@ -932,10 +943,12 @@ export function KeytapVisualizer() {
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.releaseWaveform} 
                             title="リリース音のスペクトル" 
+                            sampleRate={displaySampleRate}
                           />
                           <AudioFeaturesDisplay 
                             waveformData={selectedMeasurement.releaseWaveform} 
                             title="リリース音の特徴量" 
+                            sampleRate={displaySampleRate}
                           />
                           <AveragedWaveform 
                             waveformData={selectedMeasurement.releaseWaveform}
@@ -943,13 +956,13 @@ export function KeytapVisualizer() {
                             windowOffsetMs={0}
                             peakAlignEnabled={true}
                             title="リリース音 (KeyUp → KeyDown)"
-                            sampleRate={sampleRate}
+                            sampleRate={displaySampleRate}
                           />
                           {selectedMeasurement.releaseWindows.length > 0 && (
                             <WindowsDebugView
                               windows={selectedMeasurement.releaseWindows}
                               title="リリース音 - 個別ウィンドウ"
-                              sampleRate={sampleRate}
+                              sampleRate={displaySampleRate}
                             />
                           )}
                         </>
@@ -983,7 +996,9 @@ export function KeytapVisualizer() {
                 attackWaveform: m.attackWaveform,
                 releaseWaveform: m.releaseWaveform,
                 recordingData: m.recordingData,
+                sampleRate: m.sampleRate,
               }))}
+              defaultSampleRate={browserSampleRate}
             />
           </div>
         )}

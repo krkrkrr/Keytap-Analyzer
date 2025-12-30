@@ -1,7 +1,6 @@
 import { useEffect, useRef, useMemo, useState } from 'react'
 import styles from './CompareView.module.css'
-
-const SAMPLE_RATE = 48000
+import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 
 // 波形タイプ
 type WaveformType = 'combined' | 'attack' | 'release' | 'recording'
@@ -13,11 +12,13 @@ interface MeasurementData {
   attackWaveform: Float32Array | null
   releaseWaveform: Float32Array | null
   recordingData: Float32Array | null
+  sampleRate?: number
 }
 
 interface CompareViewProps {
   measurements: MeasurementData[]
   onClose?: () => void
+  defaultSampleRate?: number
 }
 
 // FFT実装（Cooley-Tukey algorithm）
@@ -118,7 +119,7 @@ const COLORS = [
   '#00BCD4', // シアン
 ]
 
-export function CompareView({ measurements, onClose }: CompareViewProps) {
+export function CompareView({ measurements, onClose, defaultSampleRate = DEFAULT_SAMPLE_RATE }: CompareViewProps) {
   const spectrumCanvasRef = useRef<HTMLCanvasElement>(null)
   const waveformCanvasRef = useRef<HTMLCanvasElement>(null)
   const [fftSize, setFftSize] = useState(2048)
@@ -137,6 +138,11 @@ export function CompareView({ measurements, onClose }: CompareViewProps) {
       default: return m.combinedWaveform
     }
   }
+  
+  // 測定データのサンプルレートを取得
+  const getSampleRate = (m: MeasurementData): number => {
+    return m.sampleRate || defaultSampleRate
+  }
 
   // 選択された測定のデータ（波形・スペクトル共通）
   const selectedData = useMemo(() => {
@@ -148,8 +154,15 @@ export function CompareView({ measurements, onClose }: CompareViewProps) {
         waveform: getWaveformData(m)!,
         spectrum: computePowerSpectrum(getWaveformData(m)!, fftSize),
         color: COLORS[index % COLORS.length],
+        sampleRate: getSampleRate(m),
       }))
   }, [measurements, selectedIds, fftSize, waveformType])
+  
+  // 選択された測定の代表サンプルレート（最初の選択を使用）
+  const selectedSampleRate = useMemo(() => {
+    if (selectedData.length === 0) return defaultSampleRate
+    return selectedData[0].sampleRate
+  }, [selectedData, defaultSampleRate])
 
   // スペクトル描画
   useEffect(() => {
@@ -179,7 +192,7 @@ export function CompareView({ measurements, onClose }: CompareViewProps) {
     }
 
     // 周波数分解能
-    const freqResolution = SAMPLE_RATE / fftSize
+    const freqResolution = selectedSampleRate / fftSize
     const maxBin = Math.min(Math.ceil(maxFreq / freqResolution), fftSize / 2)
     const minFreq = 20
 
@@ -343,7 +356,7 @@ export function CompareView({ measurements, onClose }: CompareViewProps) {
 
     // 最大サンプル数を取得（最も短い波形に合わせる）
     const maxSamples = Math.min(...selectedData.map(d => d.waveform.length))
-    const durationMs = (maxSamples / SAMPLE_RATE) * 1000
+    const durationMs = (maxSamples / selectedSampleRate) * 1000
 
     // 振幅の最大値を計算
     let maxAmplitude = 0

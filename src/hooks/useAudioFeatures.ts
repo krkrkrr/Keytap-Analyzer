@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import Meyda from 'meyda'
 import { arrayAbsMax } from '../utils/arrayStats'
+import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 
 // Meydaで抽出する特徴量のリスト
 const FEATURE_LIST = [
@@ -152,7 +153,7 @@ function nearestPowerOfTwo(n: number): number {
   return Math.pow(2, Math.max(9, Math.min(power, 14))) // 512〜16384の範囲
 }
 
-export function useAudioFeatures(waveformData: Float32Array | null, sampleRate = 48000): AudioFeatures {
+export function useAudioFeatures(waveformData: Float32Array | null, sampleRate = DEFAULT_SAMPLE_RATE): AudioFeatures {
   return useMemo(() => {
     const nullFeatures: AudioFeatures = {
       rms: null,

@@ -2,14 +2,15 @@ import { useMemo } from 'react'
 import { useAudioFeatures, FEATURE_DESCRIPTIONS, formatFeatureValue, type FeatureName } from '../hooks/useAudioFeatures'
 import { calculateWaveformStats } from '../utils/arrayStats'
 import styles from './AudioFeatures.module.css'
+import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 
 interface AudioFeaturesDisplayProps {
   waveformData: Float32Array | null
   title?: string
+  sampleRate?: number
 }
 
 const CHROMA_LABELS = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B']
-const SAMPLE_RATE = 48000
 
 // dB変換関数
 function linearToDb(value: number): number {
@@ -18,7 +19,7 @@ function linearToDb(value: number): number {
   return 20 * Math.log10(absValue)
 }
 
-export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }: AudioFeaturesDisplayProps) {
+export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量', sampleRate = DEFAULT_SAMPLE_RATE }: AudioFeaturesDisplayProps) {
   const features = useAudioFeatures(waveformData)
 
   // 波形データの統計情報を計算
@@ -27,8 +28,8 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
     const stats = calculateWaveformStats(waveformData)
     if (!stats) return null
 
-    const peakTimeMs = (stats.peakIndex / SAMPLE_RATE) * 1000
-    const durationMs = (stats.length / SAMPLE_RATE) * 1000
+    const peakTimeMs = (stats.peakIndex / sampleRate) * 1000
+    const durationMs = (stats.length / sampleRate) * 1000
 
     return {
       ...stats,
@@ -39,7 +40,7 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量' }
       absMaxDb: linearToDb(stats.absMax),
       rmsDb: linearToDb(stats.rms),
     }
-  }, [waveformData])
+  }, [waveformData, sampleRate])
 
   // サンプルデータ（等間隔で10個 + ピーク周辺）
   if (!waveformData) {

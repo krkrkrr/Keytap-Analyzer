@@ -1,7 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import styles from './WaveformCanvas.module.css'
-
-const DEFAULT_SAMPLE_RATE = 48000
+import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 const MARGIN = { top: 30, right: 20, bottom: 40, left: 50 }
 
 type ScaleType = 'linear' | 'dB'

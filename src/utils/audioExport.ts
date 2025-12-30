@@ -1,3 +1,5 @@
+import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
+
 /**
  * 音声データをWAV形式にエンコードする
  */
@@ -71,7 +73,7 @@ export function decodeWav(buffer: ArrayBuffer): { samples: Float32Array; sampleR
   
   // チャンクを探す
   let offset = 12
-  let sampleRate = 48000
+  let sampleRate = DEFAULT_SAMPLE_RATE
   let bitsPerSample = 16
   let numChannels = 1
   let dataOffset = 0
