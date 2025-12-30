@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
+import { MdMic, MdPlayArrow, MdStop } from 'react-icons/md'
 import styles from './WaveformCanvas.module.css'
 
 interface WaveformCanvasProps {
@@ -212,7 +213,7 @@ export function WaveformCanvas({ recordingData, isRecording = false, progress = 
   return (
     <div className={styles.canvasContainer}>
       <div className={styles.canvasHeader}>
-        <h3 style={{ margin: 0, color: '#2196F3' }}>🎙️ 録音データ</h3>
+        <h3 style={{ margin: 0, color: '#2196F3' }}><MdMic style={{ verticalAlign: 'middle', marginRight: 4 }} /> 録音データ</h3>
         {recordingData && recordingData.length > 0 && !isRecording && (
           <button 
             onClick={isPlaying ? stopWaveform : playWaveform}
@@ -220,7 +221,7 @@ export function WaveformCanvas({ recordingData, isRecording = false, progress = 
             style={{ backgroundColor: '#2196F3' }}
             title={isPlaying ? '停止' : '再生'}
           >
-            {isPlaying ? '⏹️ 停止' : '▶️ 再生'}
+            {isPlaying ? <><MdStop /> 停止</> : <><MdPlayArrow /> 再生</>}
           </button>
         )}
       </div>

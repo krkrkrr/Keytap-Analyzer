@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { MdAdd, MdBarChart, MdCompare, MdInventory, MdFolderOpen, MdSettings, MdSave, MdClose, MdMusicNote, MdTrendingUp, MdTrendingDown } from 'react-icons/md'
 import { useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useAudioContextState } from '../contexts/AudioContextProvider'
 import { AveragedWaveform } from './AveragedWaveform'
@@ -743,19 +744,19 @@ export function KeytapVisualizer() {
             className={`${styles.tab} ${activeTab === 'waveform' ? styles.tabActive : ''}`}
             onClick={() => setActiveTab('waveform')}
           >
-            ➕ 新規
+            <MdAdd /> 新規
           </button>
           <button
             className={`${styles.tab} ${activeTab === 'analysis' ? styles.tabActive : ''}`}
             onClick={() => setActiveTab('analysis')}
           >
-            📊 解析
+            <MdBarChart /> 解析
           </button>
           <button
             className={`${styles.tab} ${activeTab === 'compare' ? styles.tabActive : ''}`}
             onClick={() => setActiveTab('compare')}
           >
-            🔍 比較
+            <MdCompare /> 比較
           </button>
         </div>
 
@@ -847,7 +848,7 @@ export function KeytapVisualizer() {
                           onClick={() => setSamplesModalOpen(true)}
                           title="サンプルデータを読み込む"
                         >
-                          📦 サンプル
+                          <MdInventory /> サンプル
                         </button>
                       )}
                       <button 
@@ -855,7 +856,7 @@ export function KeytapVisualizer() {
                         onClick={handleImportClick}
                         title="測定データをインポート"
                       >
-                        📂 読込
+                        <MdFolderOpen /> 読込
                       </button>
                     </div>
                   </div>
@@ -885,7 +886,7 @@ export function KeytapVisualizer() {
                           title="平均化した打鍵音設定"
                           disabled={!m.recordingData || m.keyDownTimestamps.length < 3}
                         >
-                          ⚙️
+                          <MdSettings />
                         </button>
                         <button 
                           className={styles.measurementExportBtn}
@@ -895,7 +896,7 @@ export function KeytapVisualizer() {
                           }}
                           title="tarファイルとしてエクスポート"
                         >
-                          💾
+                          <MdSave />
                         </button>
                         <button 
                           className={styles.measurementDeleteBtn}
@@ -905,7 +906,7 @@ export function KeytapVisualizer() {
                           }}
                           title="削除"
                         >
-                          ✕
+                          <MdClose />
                         </button>
                       </div>
                     </div>
@@ -919,7 +920,7 @@ export function KeytapVisualizer() {
                     
                     {/* 元録音データ（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.recordingData && (
-                      <CollapsibleSection title={`📊 元録音データ (${(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)`}>
+                      <CollapsibleSection title={<><MdBarChart style={{ verticalAlign: 'middle', marginRight: 4 }} /> 元録音データ ({(selectedMeasurement.recordingDurationMs / 1000).toFixed(1)}秒)</>}>
                         <>
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.recordingData} 
@@ -948,7 +949,7 @@ export function KeytapVisualizer() {
 
                     {/* 平均化した打鍵音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.combinedWaveform && (
-                      <CollapsibleSection title={`🎵 平均化した打鍵音 (間隔: ${selectedMeasurement.peakIntervalMs}ms)`} defaultExpanded={true}>
+                      <CollapsibleSection title={<><MdMusicNote style={{ verticalAlign: 'middle', marginRight: 4 }} /> 平均化した打鍵音 (間隔: {selectedMeasurement.peakIntervalMs}ms)</>} defaultExpanded={true}>
                         <>
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.combinedWaveform} 
@@ -974,7 +975,7 @@ export function KeytapVisualizer() {
 
                     {/* アタック音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.attackWaveform && (
-                      <CollapsibleSection title="📈 アタック音" defaultExpanded={false}>
+                      <CollapsibleSection title={<><MdTrendingUp style={{ verticalAlign: 'middle', marginRight: 4 }} /> アタック音</>} defaultExpanded={false}>
                         <>
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.attackWaveform} 
@@ -1007,7 +1008,7 @@ export function KeytapVisualizer() {
 
                     {/* リリース音（スペクトル・特徴量・波形） */}
                     {selectedMeasurement.releaseWaveform && (
-                      <CollapsibleSection title="📉 リリース音" defaultExpanded={false}>
+                      <CollapsibleSection title={<><MdTrendingDown style={{ verticalAlign: 'middle', marginRight: 4 }} /> リリース音</>} defaultExpanded={false}>
                         <>
                           <SpectrumDisplay 
                             waveformData={selectedMeasurement.releaseWaveform} 
@@ -1048,14 +1049,14 @@ export function KeytapVisualizer() {
                     className={styles.importBtnLarge}
                     onClick={handleImportClick}
                   >
-                    📂 測定データを読み込む
+                    <MdFolderOpen /> 測定データを読み込む
                   </button>
                   {samplesList.length > 0 && (
                     <button 
                       className={styles.importBtnLarge}
                       onClick={() => setSamplesModalOpen(true)}
                     >
-                      📦 サンプルから選ぶ
+                      <MdInventory /> サンプルから選ぶ
                     </button>
                   )}
                 </div>

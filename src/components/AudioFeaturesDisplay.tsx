@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { MdBarChart } from 'react-icons/md'
 import { useAudioFeatures, FEATURE_DESCRIPTIONS, formatFeatureValue, type FeatureName } from '../hooks/useAudioFeatures'
 import { calculateWaveformStats } from '../utils/arrayStats'
 import styles from './AudioFeatures.module.css'
@@ -80,11 +81,11 @@ export function AudioFeaturesDisplay({ waveformData, title = '音声特徴量', 
 
   return (
     <div className={styles.container}>
-      <h3 className={styles.title}>{title} (Meyda)</h3>
+      <h3 className={styles.title}>{title}</h3>
 
       {/* 波形データ統計情報と基本特徴量を統合 */}
       <div className={styles.section}>
-        <h4 className={styles.sectionTitle}>📊 波形統計と基本特徴量</h4>
+        <h4 className={styles.sectionTitle}><MdBarChart style={{ verticalAlign: 'middle', marginRight: 4 }} /> 波形統計と基本特徴量</h4>
         <table className={styles.table}>
           <thead>
             <tr>
