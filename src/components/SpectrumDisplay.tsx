@@ -1,11 +1,11 @@
 import { useEffect, useRef, useMemo, useState } from 'react'
 import styles from './SpectrumDisplay.module.css'
-
-const SAMPLE_RATE = 48000
+import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 
 interface SpectrumDisplayProps {
   waveformData: Float32Array | null
   title?: string
+  sampleRate?: number
 }
 
 // FFT実装（Cooley-Tukey algorithm）
@@ -130,7 +130,7 @@ function getColor(value: number, min: number, max: number): string {
   return `rgb(${r}, ${g}, ${b})`
 }
 
-export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumDisplayProps) {
+export function SpectrumDisplay({ waveformData, title = 'FFT解析', sampleRate = DEFAULT_SAMPLE_RATE }: SpectrumDisplayProps) {
   const spectrumCanvasRef = useRef<HTMLCanvasElement>(null)
   const spectrogramCanvasRef = useRef<HTMLCanvasElement>(null)
   const [fftSize, setFftSize] = useState(2048)
@@ -169,7 +169,7 @@ export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumD
     ctx.fillRect(0, 0, width, height)
 
     // 周波数分解能
-    const freqResolution = SAMPLE_RATE / (powerSpectrum.length * 2)
+    const freqResolution = sampleRate / (powerSpectrum.length * 2)
     const maxBin = Math.min(Math.ceil(maxFreq / freqResolution), powerSpectrum.length)
     const minFreq = 20 // 対数スケールの最小周波数 (20Hz)
 
@@ -290,7 +290,7 @@ export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumD
     if (timeSteps === 0) return
 
     // 周波数分解能
-    const freqResolution = SAMPLE_RATE / (freqBins * 2)
+    const freqResolution = sampleRate / (freqBins * 2)
     const maxBin = Math.min(Math.ceil(maxFreq / freqResolution), freqBins)
 
     // dB変換してmin/max取得
@@ -324,7 +324,7 @@ export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumD
     ctx.lineWidth = 1
 
     // 時間グリッド
-    const totalDuration = waveformData.length / SAMPLE_RATE * 1000
+    const totalDuration = waveformData.length / sampleRate * 1000
     const timeStepMs = 10
     ctx.font = '11px monospace'
     ctx.fillStyle = '#888'
@@ -411,7 +411,7 @@ export function SpectrumDisplay({ waveformData, title = 'FFT解析' }: SpectrumD
             <option value={8192}>8192</option>
           </select>
           <span className={styles.hint}>
-            (分解能: {(SAMPLE_RATE / fftSize).toFixed(1)} Hz)
+            (分解能: {(sampleRate / fftSize).toFixed(1)} Hz)
           </span>
         </div>
         

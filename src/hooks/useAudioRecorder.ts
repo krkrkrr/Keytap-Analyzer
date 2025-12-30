@@ -5,6 +5,7 @@ import {
   findPeakIndex,
   calculateWindowEndTimestamps
 } from '../utils/waveformProcessing'
+import { DEFAULT_SAMPLE_RATE } from '../contexts/AudioContextProvider'
 
 export type RecordingStatus = 'idle' | 'recording' | 'completed' | 'error'
 
@@ -14,7 +15,6 @@ const DEFAULT_RELEASE_OFFSET_MS = 30 // デフォルトのリリース音前オ�
 const DEFAULT_PEAK_INTERVAL_MS = 12  // アタック音ピークからリリース音ピークまでのデフォルト間隔 (ms)
 const DEFAULT_WAVEFORM_LENGTH_MS = 70 // デフォルトの波形長 (ms)
 const DEFAULT_PEAK_POSITION_MS = 10  // デフォルトのピーク位置オフセット (ms)
-const SAMPLE_RATE = 48000    // サンプルレート (Hz)
 
 export interface UseAudioRecorderReturn {
   status: RecordingStatus
@@ -47,7 +47,14 @@ export interface UseAudioRecorderReturn {
   setPeakPositionMs: (positionMs: number) => void
 }
 
-export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderReturn {
+export interface UseAudioRecorderOptions {
+  recordingDuration?: number
+  defaultSampleRate?: number
+}
+
+export function useAudioRecorder(options: UseAudioRecorderOptions = {}): UseAudioRecorderReturn {
+  const { recordingDuration = 1000, defaultSampleRate = DEFAULT_SAMPLE_RATE } = options
+  
   const [status, setStatus] = useState<RecordingStatus>('idle')
   const [statusMessage, setStatusMessage] = useState('')
   const [recordingData, setRecordingData] = useState<Float32Array | null>(null)
@@ -65,7 +72,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   const [peakAlignEnabled, setPeakAlignEnabled] = useState(false)
   const [waveformLengthMs, setWaveformLengthMs] = useState(DEFAULT_WAVEFORM_LENGTH_MS)
   const [peakPositionMs, setPeakPositionMs] = useState(DEFAULT_PEAK_POSITION_MS)
-  const [actualSampleRate, setActualSampleRate] = useState(SAMPLE_RATE) // 実際のサンプルレート
+  const [actualSampleRate, setActualSampleRate] = useState(defaultSampleRate) // 実際のサンプルレート
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -322,7 +329,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
     const trimmedUpTimestamps = keyUpTimestamps.slice(1, -1)
     console.log(`[アタック音] 元のキータップ数: ${keyDownTimestamps.length}, 使用するキータップ数: ${trimmedDownTimestamps.length} (最初と最後を除外)`)
 
-    const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
+    const sampleRate = audioContextRef.current?.sampleRate || DEFAULT_SAMPLE_RATE
     console.log(`[アタック音] オフセット: ${offsetMs}ms, ピーク同期: ${peakAlign}`)
     
     // 動的ウィンドウ終端を計算
@@ -372,7 +379,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       : keyUpTimestamps.slice(0, 1)
     console.log(`[リリース音] 元のキーアップ数: ${keyUpTimestamps.length}, 使用するキーアップ数: ${trimmedUpTimestamps.length}`)
 
-    const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
+    const sampleRate = audioContextRef.current?.sampleRate || DEFAULT_SAMPLE_RATE
     console.log(`[リリース音] オフセット: ${offsetMs}ms, ピーク同期: ${peakAlign}`)
 
     // 動的ウィンドウ終端を計算（リリース音の場合は keyUp → 次のkeyDown または keyUp の早い方）
@@ -410,7 +417,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
       return null
     }
 
-    const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
+    const sampleRate = audioContextRef.current?.sampleRate || DEFAULT_SAMPLE_RATE
     
     console.log(`[合成波形] アタックピーク: ${findPeakIndex(attackWaveform)} (${((findPeakIndex(attackWaveform) / sampleRate) * 1000).toFixed(1)}ms)`)
     console.log(`[合成波形] リリースピーク: ${findPeakIndex(releaseWaveformData)} (${((findPeakIndex(releaseWaveformData) / sampleRate) * 1000).toFixed(1)}ms)`)
@@ -477,7 +484,7 @@ export function useAudioRecorder(recordingDuration = 1000): UseAudioRecorderRetu
   // sampleTimeMapを使用して、playbackTimeとサンプル数の対応関係から補正を行う
   const audioTimeToSampleBasedMs = useCallback((audioTime: number): number => {
     const map = sampleTimeMapRef.current
-    const sampleRate = audioContextRef.current?.sampleRate || SAMPLE_RATE
+    const sampleRate = audioContextRef.current?.sampleRate || DEFAULT_SAMPLE_RATE
     
     // マップが空の場合は単純計算
     if (map.length === 0) {
