@@ -1,0 +1,34 @@
+{
+  "samples": [
+    {
+      "filename": "Arbiter_Studio_Polar_65_Pro_onDesk.keytapanalyzer.dat",
+      "name": "Arbiter Studio Polar 65 Pro (机上)",
+      "description": "机の上に置いた状態で録音"
+    },
+    {
+      "filename": "Arbiter_Studio_Polar_65_Pro_onHand.keytapanalyzer.dat",
+      "name": "Arbiter Studio Polar 65 Pro (手持ち)",
+      "description": "手に持った状態で録音"
+    },
+    {
+      "filename": "Qwertkeys_QK80MK2_onDesk.keytapanalyzer.dat",
+      "name": "Qwertkeys QK80 MK2 (机上)",
+      "description": "机の上に置いた状態で録音"
+    },
+    {
+      "filename": "Qwertkeys_QK80MK2_onHand.keytapanalyzer.dat",
+      "name": "Qwertkeys QK80 MK2 (手持ち)",
+      "description": "手に持った状態で録音"
+    },
+    {
+      "filename": "Swagkeys_TRANSITION_LITE_onDesk.keytapanalyzer.dat",
+      "name": "Swagkeys TRANSITION LITE (机上)",
+      "description": "机の上に置いた状態で録音"
+    },
+    {
+      "filename": "Swagkeys_TRANSITION_LITE_onHand.keytapanalyzer.dat",
+      "name": "Swagkeys TRANSITION LITE (手持ち)",
+      "description": "手に持った状態で録音"
+    }
+  ]
+}

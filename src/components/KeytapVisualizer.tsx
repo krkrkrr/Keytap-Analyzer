@@ -29,6 +29,20 @@ const DEFAULT_RECORDING_DURATION = 4000 // デフォルト4秒
 const MIN_RECORDING_DURATION = 1000 // 最小1秒
 const MAX_RECORDING_DURATION = 30000 // 最大30秒
 
+// サンプルデータのベースURL（Viteのbase設定に依存）
+const SAMPLES_BASE_URL = import.meta.env.BASE_URL + 'samples/'
+
+// サンプルインデックスの型定義
+interface SampleInfo {
+  filename: string
+  name: string
+  description?: string
+}
+
+interface SamplesIndex {
+  samples: SampleInfo[]
+}
+
 type TabType = 'waveform' | 'analysis' | 'compare'
 
 // 測定結果の型定義
@@ -65,6 +79,11 @@ export function KeytapVisualizer() {
   const [selectedMeasurementId, setSelectedMeasurementId] = useState<number | null>(null)
   const [nextMeasurementId, setNextMeasurementId] = useState(1)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // サンプルデータ用の状態
+  const [samplesList, setSamplesList] = useState<SampleInfo[]>([])
+  const [samplesModalOpen, setSamplesModalOpen] = useState(false)
+  const [loadingSample, setLoadingSample] = useState(false)
   
   // AudioContext のサンプルレートを取得
   const { sampleRate: browserSampleRate } = useAudioContextState()
@@ -640,6 +659,45 @@ export function KeytapVisualizer() {
     }
   }, [nextMeasurementId, calculateMeasurementAttackWaveform, calculateMeasurementReleaseWaveform, calculateMeasurementCombinedWaveform])
 
+  // サンプルリストを読み込み
+  useEffect(() => {
+    const loadSamplesList = async () => {
+      try {
+        const response = await fetch(SAMPLES_BASE_URL + 'index.json')
+        if (response.ok) {
+          const data: SamplesIndex = await response.json()
+          setSamplesList(data.samples)
+        }
+      } catch (error) {
+        console.log('サンプルリストの読み込みに失敗しました（サンプルがない可能性があります）')
+      }
+    }
+    loadSamplesList()
+  }, [])
+
+  // サンプルデータを読み込み
+  const handleLoadSample = useCallback(async (sample: SampleInfo) => {
+    setLoadingSample(true)
+    try {
+      const response = await fetch(SAMPLES_BASE_URL + sample.filename)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch sample: ${response.status}`)
+      }
+      const buffer = await response.arrayBuffer()
+      
+      // File オブジェクトに変換して既存のインポート処理を再利用
+      const file = new File([buffer], sample.filename, { type: 'application/octet-stream' })
+      await handleImportMeasurement(file)
+      
+      setSamplesModalOpen(false)
+    } catch (error) {
+      console.error('サンプルの読み込みに失敗しました:', error)
+      alert('サンプルの読み込みに失敗しました')
+    } finally {
+      setLoadingSample(false)
+    }
+  }, [handleImportMeasurement])
+
   // ファイル選択ハンドラー
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -782,13 +840,24 @@ export function KeytapVisualizer() {
                 <div className={styles.measurementList}>
                   <div className={styles.measurementListHeader}>
                     <h4>測定履歴</h4>
-                    <button 
-                      className={styles.importBtn}
-                      onClick={handleImportClick}
-                      title="測定データをインポート"
-                    >
-                      📂 読込
-                    </button>
+                    <div className={styles.headerButtons}>
+                      {samplesList.length > 0 && (
+                        <button 
+                          className={styles.importBtn}
+                          onClick={() => setSamplesModalOpen(true)}
+                          title="サンプルデータを読み込む"
+                        >
+                          📦 サンプル
+                        </button>
+                      )}
+                      <button 
+                        className={styles.importBtn}
+                        onClick={handleImportClick}
+                        title="測定データをインポート"
+                      >
+                        📂 読込
+                      </button>
+                    </div>
                   </div>
                   {measurementHistory.map((m) => (
                     <div 
@@ -974,12 +1043,22 @@ export function KeytapVisualizer() {
             ) : (
               <div className={styles.emptyAnalysis}>
                 <p>録音を完了するか、既存のデータを読み込んでください</p>
-                <button 
-                  className={styles.importBtnLarge}
-                  onClick={handleImportClick}
-                >
-                  📂 測定データを読み込む
-                </button>
+                <div className={styles.emptyAnalysisButtons}>
+                  <button 
+                    className={styles.importBtnLarge}
+                    onClick={handleImportClick}
+                  >
+                    📂 測定データを読み込む
+                  </button>
+                  {samplesList.length > 0 && (
+                    <button 
+                      className={styles.importBtnLarge}
+                      onClick={() => setSamplesModalOpen(true)}
+                    >
+                      📦 サンプルから選ぶ
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1122,6 +1201,43 @@ export function KeytapVisualizer() {
                 onClick={handleApplyMeasurementSettings}
               >
                 適用
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* サンプル選択モーダル */}
+      {samplesModalOpen && (
+        <div className={styles.modalOverlay} onClick={() => setSamplesModalOpen(false)}>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <h3>サンプルデータを選択</h3>
+            <div className={styles.samplesList}>
+              {samplesList.map((sample, index) => (
+                <div 
+                  key={index} 
+                  className={styles.sampleItem}
+                  onClick={() => !loadingSample && handleLoadSample(sample)}
+                >
+                  <div className={styles.sampleName}>{sample.name}</div>
+                  {sample.description && (
+                    <div className={styles.sampleDescription}>{sample.description}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {loadingSample && (
+              <div className={styles.loadingOverlay}>
+                <span>読み込み中...</span>
+              </div>
+            )}
+            <div className={styles.modalFooter}>
+              <button 
+                className={styles.modalCancelBtn}
+                onClick={() => setSamplesModalOpen(false)}
+                disabled={loadingSample}
+              >
+                閉じる
               </button>
             </div>
           </div>
