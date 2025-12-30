@@ -894,7 +894,7 @@ export function KeytapVisualizer() {
                             e.stopPropagation()
                             handleExportMeasurement(m)
                           }}
-                          title="tarファイルとしてエクスポート"
+                          title="datファイルとしてエクスポート"
                         >
                           <MdSave />
                         </button>
